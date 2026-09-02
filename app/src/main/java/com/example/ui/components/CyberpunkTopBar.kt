@@ -25,7 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,8 +40,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.AppLanguage
 import com.example.model.ConnectionConfig
 import com.example.model.ConnectionStatus
+import com.example.model.HermesStrings
 import com.example.ui.theme.CyberBg
 import com.example.ui.theme.CyberSurface
 import com.example.ui.theme.CyberSurfaceBorder
@@ -61,6 +62,7 @@ fun CyberpunkTopBar(
     status: ConnectionStatus,
     config: ConnectionConfig,
     pingMs: Long,
+    language: AppLanguage,
     onToggleDemoMode: (Boolean) -> Unit,
     onClearChat: () -> Unit,
     modifier: Modifier = Modifier
@@ -77,11 +79,15 @@ fun CyberpunkTopBar(
     )
 
     val (statusColor, statusLabel) = when (status) {
-        ConnectionStatus.CONNECTED -> NeonGreen to "TAILSCALE LIVE"
-        ConnectionStatus.CONNECTING -> NeonAmber to "CONNECTING..."
-        ConnectionStatus.DEMO_MODE -> NeonVioletLight to "DEMO MODE"
-        ConnectionStatus.DISCONNECTED -> NeonRed to "OFFLINE"
-        ConnectionStatus.ERROR -> NeonRed to "CONN ERROR"
+        ConnectionStatus.CONNECTED -> NeonGreen to (if (config.isRemoteGatewayActive) {
+            if (language == AppLanguage.AR) "بوابة عن بعد متصلة" else "REMOTE GW ONLINE"
+        } else HermesStrings.statusConnected(language))
+        ConnectionStatus.CONNECTING -> NeonAmber to HermesStrings.statusConnecting(language)
+        ConnectionStatus.DEMO_MODE -> NeonVioletLight to HermesStrings.statusDemoMode(language)
+        ConnectionStatus.DISCONNECTED -> NeonRed to (if (config.isRemoteGatewayActive) {
+            if (language == AppLanguage.AR) "البوابة غير متصلة" else "GATEWAY OFFLINE"
+        } else HermesStrings.statusDisconnected(language))
+        ConnectionStatus.ERROR -> NeonRed to HermesStrings.statusError(language)
     }
 
     Column(
@@ -119,7 +125,7 @@ fun CyberpunkTopBar(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "HERMES",
+                            text = HermesStrings.appTitle(language),
                             style = MonospaceStyle.copy(
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.ExtraBold,
@@ -136,7 +142,7 @@ fun CyberpunkTopBar(
                         )
                     }
                     Text(
-                        text = "Windows 11 Agent Gateway",
+                        text = HermesStrings.appSubtitle(language),
                         style = MonospaceStyle.copy(
                             fontSize = 10.sp,
                             color = TextSecondary
@@ -147,14 +153,14 @@ fun CyberpunkTopBar(
 
             // Top Actions: Demo Mode Toggle & Clear
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Demo Mode Switch Pill
+                // Remote Gateway / Demo Mode Switch Pill
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
-                        .background(if (config.isDemoMode) NeonViolet.copy(alpha = 0.2f) else CyberSurface)
+                        .background(if (config.isRemoteGatewayActive) NeonCyan.copy(alpha = 0.15f) else NeonViolet.copy(alpha = 0.15f))
                         .border(
                             1.dp,
-                            if (config.isDemoMode) NeonViolet else CyberSurfaceBorder,
+                            if (config.isRemoteGatewayActive) NeonCyan else NeonViolet,
                             RoundedCornerShape(20.dp)
                         )
                         .clickable { onToggleDemoMode(!config.isDemoMode) }
@@ -162,12 +168,23 @@ fun CyberpunkTopBar(
                         .testTag("toggle_demo_mode"),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(if (config.isRemoteGatewayActive) NeonCyan else NeonVioletLight)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = if (config.isDemoMode) "DEMO ON" else "DEMO OFF",
+                        text = if (config.isRemoteGatewayActive) {
+                            if (language == AppLanguage.AR) "بوابة عن بعد" else "REMOTE GW"
+                        } else {
+                            if (language == AppLanguage.AR) "محاكاة" else "SIMULATOR"
+                        },
                         style = MonospaceStyle.copy(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (config.isDemoMode) NeonVioletLight else TextSecondary
+                            color = if (config.isRemoteGatewayActive) NeonCyan else NeonVioletLight
                         )
                     )
                 }
@@ -182,7 +199,7 @@ fun CyberpunkTopBar(
                 ) {
                     Icon(
                         imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = "Clear Chat",
+                        contentDescription = HermesStrings.clearChat(language),
                         tint = TextSecondary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -223,7 +240,11 @@ fun CyberpunkTopBar(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (config.isDemoMode) "SIMULATED" else "${config.tailscaleIp}:${config.port}",
+                    text = if (config.isDemoMode) {
+                        HermesStrings.simulated(language)
+                    } else {
+                        config.effectiveGatewayUrl.removePrefix("http://").removePrefix("https://")
+                    },
                     style = MonospaceStyle.copy(
                         fontSize = 10.sp,
                         color = TextSecondary

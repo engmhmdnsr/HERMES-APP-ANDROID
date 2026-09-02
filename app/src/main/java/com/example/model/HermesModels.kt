@@ -11,15 +11,32 @@ enum class ConnectionStatus {
 data class ConnectionConfig(
     val tailscaleIp: String = "100.84.12.93",
     val port: Int = 8080,
+    val remoteGatewayUrl: String = "",
+    val useCustomGatewayUrl: Boolean = false,
     val apiKey: String = "hermes_live_key_99x",
     val useHttps: Boolean = false,
-    val isDemoMode: Boolean = true
+    val isDemoMode: Boolean = false // Default to false so Remote Gateway mode is active!
 ) {
-    val baseUrl: String
+    val isRemoteGatewayActive: Boolean
+        get() = !isDemoMode
+
+    val effectiveGatewayUrl: String
         get() {
+            if (useCustomGatewayUrl && remoteGatewayUrl.isNotBlank()) {
+                val url = remoteGatewayUrl.trim()
+                return if (url.startsWith("http://") || url.startsWith("https://")) {
+                    url.trimEnd('/')
+                } else {
+                    val scheme = if (useHttps) "https" else "http"
+                    "$scheme://$url".trimEnd('/')
+                }
+            }
             val scheme = if (useHttps) "https" else "http"
-            return "$scheme://$tailscaleIp:$port"
+            return "$scheme://${tailscaleIp.trim()}:$port"
         }
+
+    val baseUrl: String
+        get() = effectiveGatewayUrl
 }
 
 data class SystemTelemetry(

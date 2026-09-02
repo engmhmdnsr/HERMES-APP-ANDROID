@@ -14,16 +14,34 @@ class HermesPreferencesRepository(context: Context) {
         private const val KEY_API_KEY = "pref_api_key"
         private const val KEY_USE_HTTPS = "pref_use_https"
         private const val KEY_DEMO_MODE = "pref_demo_mode"
+        private const val KEY_GATEWAY_URL = "pref_gateway_url"
+        private const val KEY_USE_CUSTOM_URL = "pref_use_custom_url"
         private const val KEY_MODEL = "pref_selected_model"
+        private const val KEY_LANGUAGE = "pref_app_language"
+    }
+
+    fun getAppLanguage(): com.example.model.AppLanguage {
+        val code = prefs.getString(KEY_LANGUAGE, com.example.model.AppLanguage.EN.code)
+        return if (code == com.example.model.AppLanguage.AR.code) {
+            com.example.model.AppLanguage.AR
+        } else {
+            com.example.model.AppLanguage.EN
+        }
+    }
+
+    fun saveAppLanguage(language: com.example.model.AppLanguage) {
+        prefs.edit().putString(KEY_LANGUAGE, language.code).apply()
     }
 
     fun getConnectionConfig(): ConnectionConfig {
         return ConnectionConfig(
             tailscaleIp = prefs.getString(KEY_IP, "100.84.12.93") ?: "100.84.12.93",
             port = prefs.getInt(KEY_PORT, 8080),
+            remoteGatewayUrl = prefs.getString(KEY_GATEWAY_URL, "") ?: "",
+            useCustomGatewayUrl = prefs.getBoolean(KEY_USE_CUSTOM_URL, false),
             apiKey = prefs.getString(KEY_API_KEY, "hermes_live_key_99x") ?: "hermes_live_key_99x",
             useHttps = prefs.getBoolean(KEY_USE_HTTPS, false),
-            isDemoMode = prefs.getBoolean(KEY_DEMO_MODE, true) // Start in demo mode for instant interactive testing
+            isDemoMode = prefs.getBoolean(KEY_DEMO_MODE, false) // Default to Remote Gateway mode active
         )
     }
 
@@ -31,6 +49,8 @@ class HermesPreferencesRepository(context: Context) {
         prefs.edit()
             .putString(KEY_IP, config.tailscaleIp)
             .putInt(KEY_PORT, config.port)
+            .putString(KEY_GATEWAY_URL, config.remoteGatewayUrl)
+            .putBoolean(KEY_USE_CUSTOM_URL, config.useCustomGatewayUrl)
             .putString(KEY_API_KEY, config.apiKey)
             .putBoolean(KEY_USE_HTTPS, config.useHttps)
             .putBoolean(KEY_DEMO_MODE, config.isDemoMode)
@@ -39,6 +59,10 @@ class HermesPreferencesRepository(context: Context) {
 
     fun setDemoMode(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_DEMO_MODE, enabled).apply()
+    }
+
+    fun setRemoteGatewayActive(active: Boolean) {
+        prefs.edit().putBoolean(KEY_DEMO_MODE, !active).apply()
     }
 
     fun getSelectedModelId(): String {

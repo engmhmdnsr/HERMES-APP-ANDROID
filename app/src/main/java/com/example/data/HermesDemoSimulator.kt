@@ -1,5 +1,6 @@
 package com.example.data
 
+import com.example.model.AppLanguage
 import com.example.model.ProcessInfo
 import com.example.model.SystemTelemetry
 import com.example.model.ToolExecutionBlock
@@ -11,27 +12,21 @@ import kotlin.random.Random
 
 object HermesDemoSimulator {
 
-    fun generateSimulatedTelemetry(prev: SystemTelemetry): SystemTelemetry {
-        // Subtle realistic jitter
-        val cpuJitter = (Random.nextFloat() * 6f - 3f)
-        val newCpu = (prev.cpuUsage + cpuJitter).coerceIn(18.0f, 65.0f)
+    fun generateSimulatedTelemetry(current: SystemTelemetry): SystemTelemetry {
+        val cpuFluctuation = (Random.nextFloat() * 8f - 4f)
+        val newCpu = (current.cpuUsage + cpuFluctuation).coerceIn(12f, 75f)
 
-        val ramJitter = (Random.nextFloat() * 0.4f - 0.2f)
-        val newRam = (prev.ramUsedGb + ramJitter).coerceIn(12.0f, 22.0f)
+        val ramFluctuation = (Random.nextFloat() * 0.4f - 0.2f)
+        val newRam = (current.ramUsedGb + ramFluctuation).coerceIn(10f, 28f)
 
-        val gpuJitter = (Random.nextFloat() * 5f - 2.5f)
-        val newGpu = (prev.gpuUsage + gpuJitter).coerceIn(20.0f, 85.0f)
+        val updatedHistory = (current.cpuHistory + newCpu).takeLast(16)
+        val newPing = Random.nextLong(20, 36)
 
-        val newHistory = (prev.cpuHistory + newCpu).takeLast(16)
-
-        val jitterPing = (Random.nextLong(20, 36))
-
-        return prev.copy(
-            cpuUsage = Math.round(newCpu * 10f) / 10f,
-            ramUsedGb = Math.round(newRam * 10f) / 10f,
-            gpuUsage = Math.round(newGpu * 10f) / 10f,
-            pingMs = jitterPing,
-            cpuHistory = newHistory
+        return current.copy(
+            cpuUsage = newCpu,
+            ramUsedGb = newRam,
+            pingMs = newPing,
+            cpuHistory = updatedHistory
         )
     }
 
@@ -44,20 +39,30 @@ object HermesDemoSimulator {
         )
     }
 
-    fun simulateChatStream(prompt: String, modelName: String): Flow<StreamChunk> = flow {
+    fun simulateChatStream(prompt: String, modelName: String, lang: AppLanguage = AppLanguage.EN): Flow<StreamChunk> = flow {
         val lower = prompt.lowercase()
 
-        val isProcessCheck = lower.contains("process") || lower.contains("عمليات") || lower.contains("موارد") || lower.contains("cpu")
-        val isPythonDiag = lower.contains("python") || lower.contains("بايثون") || lower.contains("سكريبت") || lower.contains("أداء")
-        val isTailscaleQuery = lower.contains("tailscale") || lower.contains("شبك") || lower.contains("firewall") || lower.contains("جدار")
+        val isProcessCheck = lower.contains("process") || lower.contains("cpu") || lower.contains("task") || lower.contains("top") || lower.contains("معالج") || lower.contains("عمليات") || lower.contains("موارد")
+        val isPythonDiag = lower.contains("python") || lower.contains("benchmark") || lower.contains("script") || lower.contains("cuda") || lower.contains("بايثون") || lower.contains("تشخيص") || lower.contains("سكريبت")
+        val isTailscaleQuery = lower.contains("tailscale") || lower.contains("tunnel") || lower.contains("firewall") || lower.contains("port") || lower.contains("نفق") || lower.contains("جدار") || lower.contains("حماية")
         val isDeepSeek = lower.contains("deepseek") || modelName.contains("DeepSeek")
 
-        val greeting = when {
-            isProcessCheck -> "جاري استدعاء مراقب مهام Windows 11 وتفقد العمليات المستهلكة للمعالج والذاكرة...\n"
-            isPythonDiag -> "جاري تشغيل سكريبت التشخيص المتقدم عبر محرك بايثون وتحليل زمن الوصول...\n"
-            isTailscaleQuery -> "تم تلقي طلب فحص النفق المشفر Tailscale وقواعد جدار الحماية في Windows 11...\n"
-            isDeepSeek -> "مرحباً! يبدأ نموذج DeepSeek R1 عملية الاستنتاج والتفكير المتسلسل لتحليل استفسارك...\n"
-            else -> "تم استلام الأمر بنجاح في سيرفر Hermes Agent على Windows 11. جاري التحليل والتنفيذ...\n"
+        val greeting = if (lang == AppLanguage.AR) {
+            when {
+                isProcessCheck -> "جاري استدعاء مدير مهام Windows 11 وفحص العمليات المستهلكة للمعالج والذاكرة...\n"
+                isPythonDiag -> "جاري تشغيل سكريبت التشخيص المتقدم عبر محرك Python لقياس أداء CUDA وسرعة الشبكة...\n"
+                isTailscaleQuery -> "جاري تدقيق نفق WireGuard المشفر عبر Tailscale وقواعد جدار حماية Windows 11...\n"
+                isDeepSeek -> "مرحباً! يقوم نموذج DeepSeek R1 بتفعيل التفكير الاستنتاجي المتسلسل لتحليل استفسارك...\n"
+                else -> "تم استلام الأمر في خادم وكيل Hermes على Windows 11. جاري التحليل وتنفيذ خط العمليات...\n"
+            }
+        } else {
+            when {
+                isProcessCheck -> "Invoking Windows 11 Task Manager & inspecting active processes for CPU/Memory metrics...\n"
+                isPythonDiag -> "Executing advanced diagnostic script via Python runtime to benchmark CUDA and network latency...\n"
+                isTailscaleQuery -> "Auditing Tailscale WireGuard encrypted tunnel and Windows 11 Defender firewall rules...\n"
+                isDeepSeek -> "Hello! DeepSeek R1 is activating its chain-of-thought reasoning process to analyze your query...\n"
+                else -> "Command received by Hermes Agent server on Windows 11. Analyzing intent and dispatching execution pipeline...\n"
+            }
         }
 
         // Stream greeting letters/words
@@ -147,35 +152,68 @@ Agent Heartbeat:           ACTIVE [OK]
         delay(250)
 
         // Stream Conclusion and AI Explanation
-        val conclusion = when {
-            isProcessCheck -> """
-                
-✅ **ملخص تقرير الموارد:**
-- يتبين أن معالج Windows 11 يعمل بحمل مستقر (حوالي 28% إجمالي).
-- أكثر العمليات استهلاكاً هي `hermes-engine.exe` و `python3.11.exe` لتشغيل نماذج الذكاء الاصطناعي ومعالجة البث اللحظي.
-- الذاكرة العشوائية المتوفرة تزيد عن 16 جيجابايت، مما يسمح بتشغيل مهام إضافية بسلاسة تامة.
-            """.trimIndent()
-            isPythonDiag -> """
-                
-⚡ **نتائج التشخيص:**
-- معالج الرسومات RTX 4090 جاهز مع استهلاك 8.2 جيجابايت من VRAM.
-- سرعة نقل البيانات داخل شبكة Tailscale بلغت 24.8ms وهي سرعة فائقة تضمن استجابة فورية لبث الـ SSE دون أي تقطيع.
-            """.trimIndent()
-            isTailscaleQuery -> """
-                
-🔒 **تقرير أمان الشبكة:**
-- اتصال Tailscale مشفر بالكامل بتقنية WireGuard بدون فتح أي منافذ بالراوتر (Zero Port Forwarding).
-- جدار حماية Windows 11 يسمح بالاتصال فقط لنطاق شبكة Tailscale (100.64.0.0/10) على المنفذ 8080، مما يمنع أي محاولة وصول من الإنترنت العام.
-            """.trimIndent()
-            isDeepSeek -> """
-                
-🧠 **تحليل DeepSeek R1:**
-تمت معالجة الاستفسار بنجاح عبر محرك الذكاء الاصطناعي المحلي. يمكنك إرسال أوامر تشغيل إضافية أو مراقبة معدل استهلاك الموارد لحظياً من تبويب المراقبة.
-            """.trimIndent()
-            else -> """
-                
-تم تنفيذ المطلوب بنجاح على نظام Windows 11. جميع مؤشرات الاتصال عبر نفق Tailscale تعمل بكفاءة تامة. يمكنك طلب أوامر أخرى أو استعلامات برمجية في أي وقت!
-            """.trimIndent()
+        val conclusion = if (lang == AppLanguage.AR) {
+            when {
+                isProcessCheck -> """
+                    
+✅ **ملخص تقرير استهلاك الموارد:**
+- معالج Windows 11 يعمل بحمل اسمي مستقر (حوالي 28% إجمالي).
+- العمليات الأكثر استهلاكاً هي `hermes-engine.exe` و `python3.11.exe` لتوليد الاستنتاجات وبث تدفق الـ SSE.
+- الذاكرة العشوائية المتوفرة تزيد عن 16 جيجابايت، مما يتيح تشغيل مهام مكثفة إضافية بدون أي اختناق.
+                """.trimIndent()
+                isPythonDiag -> """
+                    
+⚡ **نتائج التشخيص والأداء:**
+- مسرّع NVIDIA GeForce RTX 4090 نشط ومستقر، مع استخدام 8.24 جيجابايت من ذاكرة VRAM.
+- زمن استجابة نفق Tailscale تم قياسه بـ 24.8ms مع انعدام فقدان الحزم (Zero packet loss)، ما يضمن بث نصوص SSE سلس وفوري.
+                """.trimIndent()
+                isTailscaleQuery -> """
+                    
+🔒 **تدقيق أمان الشبكة ونفق Tailscale:**
+- نفق WireGuard مشفر بالكامل بين الطرفين بدون الحاجة لفتح أي منافذ على الراوتر (Zero Port Forwarding).
+- قاعدة جدار حماية Windows 11 Defender تحصر الاتصال الوارد على منفذ 8080 بأجهزة شبكة Tailscale فقط (100.64.0.0/10)، مما يحجب الوصول من الإنترنت العام تماماً.
+                """.trimIndent()
+                isDeepSeek -> """
+                    
+🧠 **استنتاج DeepSeek R1:**
+تمت معالجة الاستفسار بنجاح عبر نموذج التفكير على عتاد الجهاز المضيف. يمكنك إرسال أوامر إضافية أو متابعة مؤشرات الموارد الحية من تبويب المراقبة.
+                """.trimIndent()
+                else -> """
+                    
+تم تنفيذ المطلوب بنجاح على نظام Windows 11. جميع مؤشرات الاتصال عبر نفق Tailscale تعمل بكفاءة تامة. يمكنك طلب أوامر أخرى أو تشغيل سكريبتات برمجية في أي وقت!
+                """.trimIndent()
+            }
+        } else {
+            when {
+                isProcessCheck -> """
+                    
+✅ **Resource Inspection Summary:**
+- Windows 11 host CPU is running under nominal load (approx. 28% overall).
+- Top resource consumers are `hermes-engine.exe` and `python3.11.exe` driving LLM inference and SSE streaming.
+- Over 16 GB of physical RAM remains free and available for additional workloads.
+                """.trimIndent()
+                isPythonDiag -> """
+                    
+⚡ **Diagnostic Results:**
+- NVIDIA GeForce RTX 4090 accelerator active with 8.24 GB VRAM allocated.
+- Tailscale peer latency measured at 24.8ms with zero packet drop, ensuring crisp, real-time SSE streaming.
+                """.trimIndent()
+                isTailscaleQuery -> """
+                    
+🔒 **Network Security Audit:**
+- Tailscale tunnel is end-to-end encrypted with WireGuard (Zero Port Forwarding required).
+- Windows Defender firewall inbound rule permits connections strictly from Tailscale CGNAT subnet (100.64.0.0/10) on port 8080, shielding against public internet exposure.
+                """.trimIndent()
+                isDeepSeek -> """
+                    
+🧠 **DeepSeek R1 Analysis:**
+Inference concluded successfully on local host hardware. You can dispatch further execution commands or track live resource metrics from the Telemetry tab.
+                """.trimIndent()
+                else -> """
+                    
+Execution completed successfully on Windows 11 host. All telemetry signals and Tailscale tunnel metrics are running nominally. Feel free to submit further commands or scripts at any time!
+                """.trimIndent()
+            }
         }
 
         for (word in conclusion.split(" ")) {

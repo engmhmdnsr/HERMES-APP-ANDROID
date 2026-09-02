@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,15 +35,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.DeveloperMode
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,14 +55,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AiModelInfo
+import com.example.model.AppLanguage
 import com.example.model.AvailableAiModels
 import com.example.model.ChatMessage
+import com.example.model.ConnectionConfig
+import com.example.model.HermesStrings
 import com.example.model.MessageSender
 import com.example.ui.components.MonospaceToolBlock
 import com.example.ui.theme.CyberBg
@@ -80,7 +75,6 @@ import com.example.ui.theme.CyberTerminalBg
 import com.example.ui.theme.MonospaceStyle
 import com.example.ui.theme.NeonAmber
 import com.example.ui.theme.NeonCyan
-import com.example.ui.theme.NeonGreen
 import com.example.ui.theme.NeonRed
 import com.example.ui.theme.NeonViolet
 import com.example.ui.theme.NeonVioletLight
@@ -95,6 +89,8 @@ fun ChatTerminalScreen(
     messages: List<ChatMessage>,
     isStreaming: Boolean,
     selectedModel: AiModelInfo,
+    config: ConnectionConfig,
+    language: AppLanguage,
     onSelectModel: (AiModelInfo) -> Unit,
     onSendMessage: (String) -> Unit,
     onStopStreaming: () -> Unit,
@@ -119,8 +115,60 @@ fun ChatTerminalScreen(
         // Model Selector Bar
         ModelSelectorRow(
             selectedModel = selectedModel,
+            language = language,
             onSelectModel = onSelectModel
         )
+
+        // Remote Gateway Active Route Status Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (config.isRemoteGatewayActive) NeonCyan.copy(alpha = 0.08f) else NeonViolet.copy(alpha = 0.08f))
+                .border(
+                    1.dp,
+                    if (config.isRemoteGatewayActive) NeonCyan.copy(alpha = 0.3f) else NeonViolet.copy(alpha = 0.3f),
+                    RoundedCornerShape(6.dp)
+                )
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (config.isRemoteGatewayActive) NeonCyan else NeonVioletLight)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (config.isRemoteGatewayActive) {
+                        if (language == AppLanguage.AR) "بوابة عن بعد نشطة:" else "REMOTE GATEWAY:"
+                    } else {
+                        if (language == AppLanguage.AR) "محاكاة محلية:" else "SIMULATOR:"
+                    },
+                    style = MonospaceStyle.copy(
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (config.isRemoteGatewayActive) NeonCyan else NeonVioletLight
+                    )
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (config.isRemoteGatewayActive) {
+                        config.effectiveGatewayUrl
+                    } else {
+                        "simulated-engine://offline"
+                    },
+                    style = MonospaceStyle.copy(
+                        fontSize = 10.sp,
+                        color = TextSecondary
+                    )
+                )
+            }
+        }
 
         // Chat Message Stream
         LazyColumn(
@@ -133,13 +181,14 @@ fun ChatTerminalScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             items(messages, key = { it.id }) { message ->
-                ChatMessageItem(message = message)
+                ChatMessageItem(message = message, language = language)
             }
         }
 
         // Quick Preset Prompts Row
         QuickPresetPrompts(
             enabled = !isStreaming,
+            language = language,
             onPresetClick = { prompt ->
                 promptInput = prompt
                 onSendMessage(prompt)
@@ -150,6 +199,7 @@ fun ChatTerminalScreen(
         // Bottom Input Bar
         ChatInputBar(
             text = promptInput,
+            language = language,
             onTextChange = { promptInput = it },
             isStreaming = isStreaming,
             onSend = {
@@ -166,6 +216,7 @@ fun ChatTerminalScreen(
 @Composable
 fun ModelSelectorRow(
     selectedModel: AiModelInfo,
+    language: AppLanguage,
     onSelectModel: (AiModelInfo) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -179,7 +230,7 @@ fun ModelSelectorRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "MODEL:",
+            text = HermesStrings.modelLabel(language),
             style = MonospaceStyle.copy(
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -226,7 +277,7 @@ fun ModelSelectorRow(
 }
 
 @Composable
-fun ChatMessageItem(message: ChatMessage) {
+fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
     val formattedTime = remember(message.timestamp) { timeFormat.format(Date(message.timestamp)) }
 
@@ -253,7 +304,7 @@ fun ChatMessageItem(message: ChatMessage) {
                 modifier = Modifier.padding(bottom = 4.dp, end = 4.dp)
             ) {
                 Text(
-                    text = "YOU",
+                    text = HermesStrings.you(language),
                     style = MonospaceStyle.copy(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -306,7 +357,7 @@ fun ChatMessageItem(message: ChatMessage) {
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "HERMES AGENT",
+                    text = HermesStrings.hermesAgent(language),
                     style = MonospaceStyle.copy(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
@@ -337,16 +388,16 @@ fun ChatMessageItem(message: ChatMessage) {
                 if (message.isStreaming) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "STREAMING",
+                        text = HermesStrings.streamingBadge(language),
                         style = MonospaceStyle.copy(
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             color = NeonAmber
                         ),
                         modifier = Modifier
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(NeonAmber.copy(alpha = 0.2f))
-                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(NeonAmber.copy(alpha = 0.15f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
             }
@@ -367,7 +418,7 @@ fun ChatMessageItem(message: ChatMessage) {
                         modifier = Modifier.padding(bottom = if (message.content.isNotEmpty()) 12.dp else 0.dp)
                     ) {
                         message.toolExecutions.forEach { tool ->
-                            MonospaceToolBlock(tool = tool)
+                            MonospaceToolBlock(tool = tool, language = language)
                         }
                     }
                 }
@@ -404,7 +455,7 @@ fun ChatMessageItem(message: ChatMessage) {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Receiving SSE text stream...",
+                            text = HermesStrings.receivingStream(language),
                             style = MonospaceStyle.copy(
                                 fontSize = 12.sp,
                                 color = TextSecondary
@@ -420,13 +471,14 @@ fun ChatMessageItem(message: ChatMessage) {
 @Composable
 fun QuickPresetPrompts(
     enabled: Boolean,
+    language: AppLanguage,
     onPresetClick: (String) -> Unit
 ) {
     val presets = listOf(
-        "⚡ فحص استهلاك الـ CPU والعمليات",
-        "🐍 سكريبت بايثون لفحص أداء النظام",
-        "🔒 تدقيق اتصال Tailscale وجدار الحماية",
-        "🧠 استنتاج واستكشاف أخطاء بنموذج DeepSeek R1"
+        HermesStrings.presetCpu(language),
+        HermesStrings.presetPython(language),
+        HermesStrings.presetTailscale(language),
+        HermesStrings.presetDeepSeek(language)
     )
 
     Row(
@@ -461,6 +513,7 @@ fun QuickPresetPrompts(
 @Composable
 fun ChatInputBar(
     text: String,
+    language: AppLanguage,
     onTextChange: (String) -> Unit,
     isStreaming: Boolean,
     onSend: () -> Unit,
@@ -485,7 +538,7 @@ fun ChatInputBar(
         ) {
             if (text.isEmpty()) {
                 Text(
-                    text = "Type prompt or system command (e.g. check cpu, run script)...",
+                    text = HermesStrings.inputPlaceholder(language),
                     style = MonospaceStyle.copy(
                         fontSize = 12.sp,
                         color = TextSecondary.copy(alpha = 0.7f)
@@ -523,7 +576,7 @@ fun ChatInputBar(
             ) {
                 Icon(
                     imageVector = Icons.Default.Stop,
-                    contentDescription = "Stop Streaming",
+                    contentDescription = HermesStrings.stopStreaming(language),
                     tint = NeonRed,
                     modifier = Modifier.size(20.dp)
                 )
@@ -545,7 +598,7 @@ fun ChatInputBar(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send Command",
+                    contentDescription = HermesStrings.sendCommand(language),
                     tint = if (text.isNotBlank()) Color.White else TextSecondary,
                     modifier = Modifier.size(18.dp)
                 )

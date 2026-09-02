@@ -9,10 +9,12 @@ import com.example.data.HermesPreferencesRepository
 import com.example.data.PingResult
 import com.example.data.StreamChunk
 import com.example.model.AiModelInfo
+import com.example.model.AppLanguage
 import com.example.model.AvailableAiModels
 import com.example.model.ChatMessage
 import com.example.model.ConnectionConfig
 import com.example.model.ConnectionStatus
+import com.example.model.HermesStrings
 import com.example.model.MessageSender
 import com.example.model.SystemTelemetry
 import com.example.model.ToolStatus
@@ -66,6 +68,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _isPinging = MutableStateFlow(false)
     val isPinging: StateFlow<Boolean> = _isPinging.asStateFlow()
 
+    private val _appLanguage = MutableStateFlow(prefsRepo.getAppLanguage())
+    val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
+
     private var telemetryPollingJob: Job? = null
     private var streamingJob: Job? = null
 
@@ -75,18 +80,22 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         startTelemetryPolling()
     }
 
+    fun setAppLanguage(language: AppLanguage) {
+        _appLanguage.value = language
+        prefsRepo.saveAppLanguage(language)
+        // If current chat is only the welcome message, refresh it with new language
+        if (_chatMessages.value.size <= 1) {
+            seedInitialWelcomeMessage()
+        }
+    }
+
     private fun seedInitialWelcomeMessage() {
         val welcome = ChatMessage(
             id = "welcome_msg",
             sender = MessageSender.HERMES,
             timestamp = System.currentTimeMillis(),
             modelName = _selectedModel.value.displayName,
-            content = """
-مرحباً بك في مركز التحكم **Hermes Control Center** ⚡
-الوكيل الذكي جاهز على نظام Windows 11 عبر نفق Tailscale المشفر.
-
-يمكنك إرسال استفسارات، تشغيل أوامر النظام، ومراقبة الـ CPU والذاكرة مباشرة. جرّب أحد الأوامر الجاهزة بالأسفل لاختبار بث الـ SSE وصناديق التنفيذ البرمجية.
-            """.trimIndent(),
+            content = HermesStrings.welcomeMessage(_appLanguage.value),
             isStreaming = false
         )
         _chatMessages.value = listOf(welcome)
@@ -145,9 +154,11 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         val updated = _config.value.copy(isDemoMode = enabled)
         _config.value = updated
         prefsRepo.saveConnectionConfig(updated)
-        _connectionStatus.value = if (enabled) ConnectionStatus.DEMO_MODE else ConnectionStatus.DISCONNECTED
+        _connectionStatus.value = if (enabled) ConnectionStatus.DEMO_MODE else ConnectionStatus.CONNECTING
         if (enabled) {
             _pingResult.value = HermesDemoSimulator.simulatePing(updated.tailscaleIp, updated.port)
+        } else {
+            testPing()
         }
         startTelemetryPolling()
     }
@@ -202,7 +213,11 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         streamingJob?.cancel()
         streamingJob = viewModelScope.launch {
             val streamFlow = if (_config.value.isDemoMode) {
-                HermesDemoSimulator.simulateChatStream(trimmed, _selectedModel.value.displayName)
+                HermesDemoSimulator.simulateChatStream(
+                    prompt = trimmed,
+                    modelName = _selectedModel.value.displayName,
+                    lang = _appLanguage.value
+                )
             } else {
                 networkClient.streamChat(_config.value, trimmed, _selectedModel.value.id)
             }

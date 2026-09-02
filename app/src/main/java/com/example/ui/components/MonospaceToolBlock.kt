@@ -13,7 +13,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,10 +48,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.AppLanguage
+import com.example.model.HermesStrings
 import com.example.model.ToolExecutionBlock
 import com.example.model.ToolStatus
 import com.example.ui.theme.CyberSurfaceBorder
@@ -69,6 +69,7 @@ import com.example.ui.theme.TextTerminal
 @Composable
 fun MonospaceToolBlock(
     tool: ToolExecutionBlock,
+    language: AppLanguage = AppLanguage.EN,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -173,7 +174,7 @@ fun MonospaceToolBlock(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "RUNNING",
+                                text = HermesStrings.toolRunning(language),
                                 style = MonospaceStyle.copy(
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
@@ -234,7 +235,7 @@ fun MonospaceToolBlock(
                         )
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(clip)
-                        Toast.makeText(context, "Command & output copied", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, HermesStrings.toolCopied(language), Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier
                         .size(28.dp)
@@ -314,7 +315,7 @@ fun MonospaceToolBlock(
                     }
                 } else if (tool.status == ToolStatus.RUNNING) {
                     Text(
-                        text = "⏳ Executing process on Windows 11 host...",
+                        text = "⏳ ${HermesStrings.toolExecuting(language)}",
                         style = MonospaceStyle.copy(
                             fontSize = 11.sp,
                             color = NeonAmber.copy(alpha = 0.8f)
