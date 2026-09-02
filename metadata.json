@@ -1,0 +1,6 @@
+{
+  "name": "Hermes Control Center",
+  "description": "Mobile control center to monitor and manage Hermes Agent on Windows 11 securely via Tailscale with real-time SSE streaming, execution blocks, and system telemetry.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
