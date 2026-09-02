@@ -61,6 +61,12 @@ fun MainScreen(
     val pingResult by viewModel.pingResult.collectAsState()
     val isPinging by viewModel.isPinging.collectAsState()
     val language by viewModel.appLanguage.collectAsState()
+    val discoveredGateway by viewModel.discoveredGateway.collectAsState()
+    val isDiscovering by viewModel.isDiscovering.collectAsState()
+    val sessions by viewModel.sessions.collectAsState()
+    val currentSessionId by viewModel.currentSessionId.collectAsState()
+    val availableModels by viewModel.availableModels.collectAsState()
+    val isLoadingSessions by viewModel.isLoadingSessions.collectAsState()
 
     val layoutDirection = if (language == AppLanguage.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
 
@@ -190,9 +196,16 @@ fun MainScreen(
                             messages = chatMessages,
                             isStreaming = isStreaming,
                             selectedModel = selectedModel,
+                            availableModels = availableModels,
+                            sessions = sessions,
+                            currentSessionId = currentSessionId,
+                            isLoadingSessions = isLoadingSessions,
                             config = config,
                             language = language,
                             onSelectModel = { viewModel.selectModel(it) },
+                            onSelectSession = { viewModel.selectSession(it) },
+                            onCreateNewSession = { viewModel.createNewSession() },
+                            onRefreshSessions = { viewModel.loadSessions() },
                             onSendMessage = { viewModel.sendMessage(it) },
                             onStopStreaming = { viewModel.stopStreaming() }
                         )
@@ -212,10 +225,15 @@ fun MainScreen(
                             pingResult = pingResult,
                             isPinging = isPinging,
                             language = language,
+                            discoveredGateway = discoveredGateway,
+                            isDiscovering = isDiscovering,
                             onLanguageChange = { viewModel.setAppLanguage(it) },
                             onSaveConfig = { viewModel.updateConnectionConfig(it) },
                             onTestPing = { viewModel.testPing() },
-                            onToggleDemoMode = { viewModel.toggleDemoMode(it) }
+                            onToggleDemoMode = { viewModel.toggleDemoMode(it) },
+                            onStartAutoDiscovery = { viewModel.startAutoDiscovery() },
+                            onConnectDiscovered = { discovered, useTailscale -> viewModel.connectDiscovered(discovered, useTailscale) },
+                            onImportFromQr = { viewModel.importFromQr(it) }
                         )
                     }
                 }

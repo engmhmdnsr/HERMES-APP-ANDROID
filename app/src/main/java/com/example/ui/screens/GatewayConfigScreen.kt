@@ -23,18 +23,21 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.WifiFind
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,6 +46,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
+import com.example.model.DiscoveredGateway
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -94,8 +98,18 @@ fun GatewayConfigScreen(
     onSaveConfig: (ConnectionConfig) -> Unit,
     onTestPing: () -> Unit,
     onToggleDemoMode: (Boolean) -> Unit,
+    discoveredGateway: DiscoveredGateway? = null,
+    isDiscovering: Boolean = false,
+    onStartAutoDiscovery: () -> Unit = {},
+    onConnectDiscovered: (DiscoveredGateway, Boolean) -> Unit = { _, _ -> },
+    onImportFromQr: (String) -> Boolean = { false },
     modifier: Modifier = Modifier
 ) {
+    val clipboardManager = LocalClipboardManager.current
+    var qrInput by remember { mutableStateOf("") }
+    var qrFeedbackMessage by remember { mutableStateOf<String?>(null) }
+    var showQrManualInput by remember { mutableStateOf(false) }
+
     var ipInput by remember(config.tailscaleIp) { mutableStateOf(config.tailscaleIp) }
     var portInput by remember(config.port) { mutableStateOf(config.port.toString()) }
     var remoteGatewayUrlInput by remember(config.remoteGatewayUrl) { mutableStateOf(config.remoteGatewayUrl) }
@@ -274,6 +288,289 @@ fun GatewayConfigScreen(
                                     fontSize = 10.sp,
                                     color = if (isAr) NeonCyan else TextSecondary.copy(alpha = 0.6f)
                                 )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Auto-Discovery Card
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(CyberSurface)
+                    .border(
+                        1.dp,
+                        if (discoveredGateway != null) NeonGreen else if (isDiscovering) NeonCyan else CyberSurfaceBorder,
+                        RoundedCornerShape(16.dp)
+                    )
+                    .padding(16.dp)
+                    .testTag("auto_discovery_card")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.WifiFind,
+                            contentDescription = null,
+                            tint = if (discoveredGateway != null) NeonGreen else NeonCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = HermesStrings.autoDiscoverTitle(language),
+                            style = MonospaceStyle.copy(
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        )
+                    }
+
+                    if (isDiscovering) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = NeonCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        Text(
+                            text = HermesStrings.autoDiscoverBtnRescan(language),
+                            style = MonospaceStyle.copy(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(NeonCyan.copy(alpha = 0.15f))
+                                .clickable { onStartAutoDiscovery() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (isDiscovering) {
+                    Text(
+                        text = HermesStrings.autoDiscoverSearching(language),
+                        style = MonospaceStyle.copy(
+                            fontSize = 11.sp,
+                            color = NeonCyan
+                        )
+                    )
+                } else if (discoveredGateway != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF0C1917))
+                            .border(1.dp, NeonGreen.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            .padding(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = NeonGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = HermesStrings.autoDiscoverFoundTitle(language, discoveredGateway.hostname),
+                                style = MonospaceStyle.copy(
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonGreen
+                                )
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "IP: ${discoveredGateway.ip}:${discoveredGateway.port}" +
+                                    (if (!discoveredGateway.tailscaleIp.isNullOrBlank()) " | Tailscale: ${discoveredGateway.tailscaleIp}" else ""),
+                            style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary)
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { onConnectDiscovered(discoveredGateway, false) },
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonGreen),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = HermesStrings.autoDiscoverBtnConnect(language),
+                                    style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                )
+                            }
+
+                            if (!discoveredGateway.tailscaleIp.isNullOrBlank()) {
+                                Button(
+                                    onClick = { onConnectDiscovered(discoveredGateway, true) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = CyberSurfaceElevated),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.border(1.dp, NeonViolet, RoundedCornerShape(8.dp))
+                                ) {
+                                    Text(
+                                        text = "Tailscale",
+                                        style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonVioletLight)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = HermesStrings.autoDiscoverNotFound(language),
+                        style = MonospaceStyle.copy(
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            lineHeight = 16.sp
+                        )
+                    )
+                }
+            }
+        }
+
+        // QR Code Pairing Card
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(CyberSurface)
+                    .border(1.dp, NeonViolet.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                    .padding(16.dp)
+                    .testTag("qr_pairing_card")
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = null,
+                        tint = NeonVioletLight,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = HermesStrings.qrPairTitle(language),
+                        style = MonospaceStyle.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    )
+                }
+
+                Text(
+                    text = HermesStrings.qrPairDesc(language),
+                    style = MonospaceStyle.copy(
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
+                    ),
+                    modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val clipText = clipboardManager.getText()?.text ?: ""
+                            if (clipText.isNotBlank()) {
+                                val success = onImportFromQr(clipText)
+                                qrFeedbackMessage = if (success) {
+                                    HermesStrings.qrSuccessToast(language)
+                                } else {
+                                    HermesStrings.qrErrorToast(language)
+                                }
+                            } else {
+                                qrFeedbackMessage = HermesStrings.qrErrorToast(language)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonViolet),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.ContentPaste, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = HermesStrings.qrBtnPaste(language),
+                            style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        )
+                    }
+
+                    Button(
+                        onClick = { showQrManualInput = !showQrManualInput },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberSurfaceElevated),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.border(1.dp, CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                    ) {
+                        Text(
+                            text = if (showQrManualInput) "▲" else "▼",
+                            style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonCyan)
+                        )
+                    }
+                }
+
+                qrFeedbackMessage?.let { msg ->
+                    Text(
+                        text = msg,
+                        style = MonospaceStyle.copy(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (msg.startsWith("✅")) NeonGreen else NeonAmber
+                        ),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
+                AnimatedVisibility(visible = showQrManualInput) {
+                    Column(modifier = Modifier.padding(top = 10.dp)) {
+                        OutlinedTextField(
+                            value = qrInput,
+                            onValueChange = { qrInput = it },
+                            placeholder = { Text(HermesStrings.qrInputPlaceholder(language), style = MonospaceStyle.copy(fontSize = 10.sp)) },
+                            singleLine = true,
+                            textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonViolet,
+                                unfocusedBorderColor = CyberSurfaceBorder,
+                                focusedContainerColor = CyberSurfaceElevated,
+                                unfocusedContainerColor = CyberSurfaceElevated
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                if (qrInput.isNotBlank()) {
+                                    val success = onImportFromQr(qrInput)
+                                    qrFeedbackMessage = if (success) {
+                                        qrInput = ""
+                                        showQrManualInput = false
+                                        HermesStrings.qrSuccessToast(language)
+                                    } else {
+                                        HermesStrings.qrErrorToast(language)
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = HermesStrings.qrBtnApply(language),
+                                style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                             )
                         }
                     }

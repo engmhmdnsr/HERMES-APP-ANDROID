@@ -8,6 +8,14 @@ enum class ConnectionStatus {
     ERROR
 }
 
+data class DiscoveredGateway(
+    val hostname: String,
+    val ip: String,
+    val tailscaleIp: String? = null,
+    val port: Int = 8080,
+    val apiKey: String = ""
+)
+
 data class ConnectionConfig(
     val tailscaleIp: String = "100.84.12.93",
     val port: Int = 8080,
@@ -127,4 +135,12 @@ val AvailableAiModels = listOf(
         provider = "Nous Research",
         description = "Agentic tool-use model running locally"
     )
+)
+
+data class HermesSession(
+    val id: String,
+    val title: String,
+    val model: String = "default",
+    val startedAt: Long = 0L,
+    val messageCount: Int = 0
 )

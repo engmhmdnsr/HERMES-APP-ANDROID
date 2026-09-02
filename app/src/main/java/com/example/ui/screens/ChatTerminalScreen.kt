@@ -35,13 +35,21 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -64,6 +72,7 @@ import com.example.model.AppLanguage
 import com.example.model.AvailableAiModels
 import com.example.model.ChatMessage
 import com.example.model.ConnectionConfig
+import com.example.model.HermesSession
 import com.example.model.HermesStrings
 import com.example.model.MessageSender
 import com.example.ui.components.MonospaceToolBlock
@@ -84,19 +93,28 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatTerminalScreen(
     messages: List<ChatMessage>,
     isStreaming: Boolean,
     selectedModel: AiModelInfo,
+    availableModels: List<AiModelInfo>,
+    sessions: List<HermesSession>,
+    currentSessionId: String?,
+    isLoadingSessions: Boolean,
     config: ConnectionConfig,
     language: AppLanguage,
     onSelectModel: (AiModelInfo) -> Unit,
+    onSelectSession: (String) -> Unit,
+    onCreateNewSession: () -> Unit,
+    onRefreshSessions: () -> Unit,
     onSendMessage: (String) -> Unit,
     onStopStreaming: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var promptInput by remember { mutableStateOf("") }
+    var showSessionsSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     // Auto-scroll to bottom when new messages arrive or stream updates
@@ -115,9 +133,171 @@ fun ChatTerminalScreen(
         // Model Selector Bar
         ModelSelectorRow(
             selectedModel = selectedModel,
+            availableModels = availableModels,
             language = language,
             onSelectModel = onSelectModel
         )
+
+        // Sessions Selector Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            val activeSession = sessions.find { it.id == currentSessionId }
+            val activeTitle = activeSession?.title ?: (if (language == AppLanguage.AR) "الجلسات (${sessions.size})" else "Sessions (${sessions.size})")
+
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(CyberSurfaceElevated)
+                    .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                    .clickable { showSessionsSheet = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = NeonCyan,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = activeTitle,
+                    style = MonospaceStyle.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    ),
+                    maxLines = 1
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // New Session Button
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(NeonViolet.copy(alpha = 0.2f))
+                    .border(1.dp, NeonViolet, RoundedCornerShape(8.dp))
+                    .clickable { onCreateNewSession() }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    tint = NeonVioletLight,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = if (language == AppLanguage.AR) "جديدة" else "New",
+                    style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonVioletLight)
+                )
+            }
+        }
+
+        if (showSessionsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showSessionsSheet = false },
+                containerColor = Color(0xFF0C1017),
+                contentColor = TextPrimary
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (language == AppLanguage.AR) "جلسات هيرمز على الكمبيوتر" else "Hermes Agent Sessions on PC",
+                            style = MonospaceStyle.copy(
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan
+                            )
+                        )
+                        IconButton(onClick = onRefreshSessions) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = NeonCyan)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (sessions.isEmpty()) {
+                        Text(
+                            text = if (isLoadingSessions) {
+                                if (language == AppLanguage.AR) "جاري تحميل الجلسات من السيرفر..." else "Loading sessions..."
+                            } else {
+                                if (language == AppLanguage.AR) "لا توجد جلسات محفوظة حتى الآن" else "No saved sessions found"
+                            },
+                            style = MonospaceStyle.copy(color = TextSecondary, fontSize = 12.sp),
+                            modifier = Modifier.padding(vertical = 20.dp)
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(320.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(sessions) { s ->
+                                val isCurrent = s.id == currentSessionId
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isCurrent) NeonViolet.copy(alpha = 0.25f) else CyberSurfaceElevated)
+                                        .border(
+                                            1.dp,
+                                            if (isCurrent) NeonViolet else CyberSurfaceBorder,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            onSelectSession(s.id)
+                                            showSessionsSheet = false
+                                        }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = s.title,
+                                            style = MonospaceStyle.copy(
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (isCurrent) NeonCyan else TextPrimary
+                                            ),
+                                            maxLines = 1
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Model: ${s.model} • Msgs: ${s.messageCount}",
+                                            style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                                        )
+                                    }
+                                    if (isCurrent) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+            }
+        }
 
         // Remote Gateway Active Route Status Bar
         Row(
@@ -213,13 +393,34 @@ fun ChatTerminalScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelSelectorRow(
     selectedModel: AiModelInfo,
+    availableModels: List<AiModelInfo>,
     language: AppLanguage,
     onSelectModel: (AiModelInfo) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val models = if (availableModels.isNotEmpty()) availableModels else AvailableAiModels
+    var showAllModelsSheet by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedProviderFilter by remember { mutableStateOf("ALL") }
+
+    val quickChips = remember(models, selectedModel) {
+        val list = mutableListOf<AiModelInfo>()
+        if (models.any { it.id == selectedModel.id }) {
+            list.add(selectedModel)
+        }
+        for (m in models) {
+            if (list.size >= 7) break
+            if (m.id != selectedModel.id) {
+                list.add(m)
+            }
+        }
+        list
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -238,7 +439,35 @@ fun ModelSelectorRow(
             )
         )
 
-        AvailableAiModels.forEach { model ->
+        // All Models Sheet Trigger Button
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(NeonCyan.copy(alpha = 0.15f))
+                .border(1.dp, NeonCyan, RoundedCornerShape(8.dp))
+                .clickable { showAllModelsSheet = true }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                tint = NeonCyan,
+                modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = if (language == AppLanguage.AR) "كل الموديلات (${models.size}) 🔍" else "All Models (${models.size}) 🔍",
+                style = MonospaceStyle.copy(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NeonCyan
+                )
+            )
+        }
+
+        // Quick Top Chips
+        quickChips.forEach { model ->
             val isSelected = model.id == selectedModel.id
             Row(
                 modifier = Modifier
@@ -271,6 +500,183 @@ fun ModelSelectorRow(
                         color = if (isSelected) TextPrimary else TextSecondary
                     )
                 )
+            }
+        }
+    }
+
+    if (showAllModelsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAllModelsSheet = false },
+            containerColor = CyberSurface
+        ) {
+            val providers = remember(models) {
+                listOf("ALL") + models.map { it.provider }.distinct()
+            }
+            val filteredModels = remember(models, searchQuery, selectedProviderFilter) {
+                models.filter { m ->
+                    val matchesSearch = searchQuery.isBlank() ||
+                        m.displayName.contains(searchQuery, ignoreCase = true) ||
+                        m.id.contains(searchQuery, ignoreCase = true) ||
+                        m.provider.contains(searchQuery, ignoreCase = true)
+                    val matchesProvider = selectedProviderFilter == "ALL" || m.provider == selectedProviderFilter
+                    matchesSearch && matchesProvider
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = if (language == AppLanguage.AR) "موديلات هيرمز المتاحة" else "Available Hermes Models",
+                            style = MonospaceStyle.copy(
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan
+                            )
+                        )
+                        Text(
+                            text = if (language == AppLanguage.AR) "${filteredModels.size} من أصل ${models.size} موديل" else "${filteredModels.size} of ${models.size} models",
+                            style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary)
+                        )
+                    }
+                    IconButton(onClick = { showAllModelsSheet = false }) {
+                        Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Search Box
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CyberSurfaceElevated)
+                        .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.weight(1f),
+                        textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
+                        cursorBrush = SolidColor(NeonCyan),
+                        decorationBox = { innerTextField ->
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = if (language == AppLanguage.AR) "ابحث عن أي موديل بالاسم أو المزود..." else "Search models...",
+                                    style = MonospaceStyle.copy(color = TextSecondary, fontSize = 12.sp)
+                                )
+                            }
+                            innerTextField()
+                        }
+                    )
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(16.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Provider Filter Chips
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    providers.forEach { prov ->
+                        val isProvSelected = prov == selectedProviderFilter
+                        val label = if (prov == "ALL") (if (language == AppLanguage.AR) "الكل" else "ALL") else prov
+                        Text(
+                            text = label,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isProvSelected) NeonCyan.copy(alpha = 0.2f) else CyberSurfaceElevated)
+                                .border(1.dp, if (isProvSelected) NeonCyan else CyberSurfaceBorder, RoundedCornerShape(6.dp))
+                                .clickable { selectedProviderFilter = prov }
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            style = MonospaceStyle.copy(
+                                fontSize = 11.sp,
+                                fontWeight = if (isProvSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isProvSelected) NeonCyan else TextSecondary
+                            )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Models LazyColumn
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(360.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filteredModels) { m ->
+                        val isSelected = m.id == selectedModel.id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) NeonViolet.copy(alpha = 0.25f) else CyberSurfaceElevated)
+                                .border(1.dp, if (isSelected) NeonViolet else CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                                .clickable {
+                                    onSelectModel(m)
+                                    showAllModelsSheet = false
+                                }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = m.displayName,
+                                        style = MonospaceStyle.copy(
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) NeonVioletLight else TextPrimary
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = m.provider,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF141E28))
+                                            .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MonospaceStyle.copy(fontSize = 9.sp, color = NeonCyan)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = m.id,
+                                    style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }

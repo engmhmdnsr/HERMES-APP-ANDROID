@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -109,14 +111,14 @@ fun CyberpunkTopBar(
                         .size(36.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color(0xFF16192E))
-                        .border(1.dp, NeonViolet.copy(alpha = 0.6f), RoundedCornerShape(8.dp)),
+                        .border(1.dp, NeonViolet.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        .padding(4.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Bolt,
-                        contentDescription = "Hermes Logo",
-                        tint = NeonCyan,
-                        modifier = Modifier.size(22.dp)
+                    Image(
+                        painter = painterResource(id = com.example.R.drawable.ic_hermes_logo),
+                        contentDescription = "Oversight Logo",
+                        modifier = Modifier.size(26.dp)
                     )
                 }
 

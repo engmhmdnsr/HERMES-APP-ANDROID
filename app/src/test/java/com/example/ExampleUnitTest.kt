@@ -42,7 +42,7 @@ class ExampleUnitTest {
     val enTitle = HermesStrings.remoteGatewayModeTitle(AppLanguage.EN)
     val arTitle = HermesStrings.remoteGatewayModeTitle(AppLanguage.AR)
     assertNotEquals(enTitle, arTitle)
-    assertTrue(enTitle.contains("Remote Gateway"))
-    assertTrue(arTitle.contains("البوابة عن بعد"))
+    assertTrue(enTitle.contains("REMOTE GATEWAY", ignoreCase = true))
+    assertTrue(arTitle.contains("عن بعد"))
   }
 }

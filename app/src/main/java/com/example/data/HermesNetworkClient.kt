@@ -1,6 +1,11 @@
 package com.example.data
 
+import com.example.model.AiModelInfo
+import com.example.model.ChatMessage
 import com.example.model.ConnectionConfig
+import com.example.model.DiscoveredGateway
+import com.example.model.HermesSession
+import com.example.model.MessageSender
 import com.example.model.ProcessInfo
 import com.example.model.SystemTelemetry
 import com.example.model.ToolExecutionBlock
@@ -15,6 +20,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 
 data class PingResult(
@@ -38,6 +46,54 @@ class HermesNetworkClient {
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .build()
+
+    suspend fun discoverLocalGateway(timeoutMs: Long = 3000): DiscoveredGateway? = withContext(Dispatchers.IO) {
+        var socket: DatagramSocket? = null
+        try {
+            socket = DatagramSocket().apply {
+                broadcast = true
+                soTimeout = 1500
+            }
+            val pingBytes = "HERMES_DISCOVER".toByteArray()
+            val broadcastPacket = DatagramPacket(
+                pingBytes,
+                pingBytes.size,
+                InetAddress.getByName("255.255.255.255"),
+                8089
+            )
+            socket.send(broadcastPacket)
+
+            val receiveBuffer = ByteArray(2048)
+            val receivePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
+            val startTime = System.currentTimeMillis()
+
+            while (System.currentTimeMillis() - startTime < timeoutMs) {
+                try {
+                    socket.receive(receivePacket)
+                    val raw = String(receivePacket.data, 0, receivePacket.length)
+                    val json = JSONObject(raw)
+                    if (json.optString("service") == "hermes-agent") {
+                        val senderIp = json.optString("ip").ifEmpty { receivePacket.address.hostAddress ?: "127.0.0.1" }
+                        val tsIp = json.optString("tailscale_ip").takeIf { it.isNotBlank() && it != "null" }
+                        return@withContext DiscoveredGateway(
+                            hostname = json.optString("hostname", "WIN11-HERMES"),
+                            ip = senderIp,
+                            tailscaleIp = tsIp,
+                            port = json.optInt("port", 8080),
+                            apiKey = json.optString("apiKey", json.optString("api_key", ""))
+                        )
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        } finally {
+            socket?.close()
+        }
+    }
 
     suspend fun ping(config: ConnectionConfig): PingResult = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
@@ -157,16 +213,173 @@ class HermesNetworkClient {
         }
     }
 
+    suspend fun fetchSessions(config: ConnectionConfig): Result<List<HermesSession>> = withContext(Dispatchers.IO) {
+        val url = "${config.baseUrl}/api/sessions"
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .get()
+
+        if (config.apiKey.isNotBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer ${config.apiKey}")
+            requestBuilder.addHeader("X-API-Key", config.apiKey)
+        }
+
+        try {
+            val response = client.newCall(requestBuilder.build()).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
+
+            val bodyStr = response.body?.string() ?: "[]"
+            val array = org.json.JSONArray(bodyStr)
+            val list = mutableListOf<HermesSession>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    HermesSession(
+                        id = obj.getString("id"),
+                        title = obj.optString("title", obj.getString("id")),
+                        model = obj.optString("model", "default"),
+                        startedAt = obj.optLong("started_at", 0L),
+                        messageCount = obj.optInt("message_count", 0)
+                    )
+                )
+            }
+            Result.success(list)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchSessionMessages(config: ConnectionConfig, sessionId: String): Result<List<ChatMessage>> = withContext(Dispatchers.IO) {
+        val url = "${config.baseUrl}/api/sessions/$sessionId/messages"
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .get()
+
+        if (config.apiKey.isNotBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer ${config.apiKey}")
+            requestBuilder.addHeader("X-API-Key", config.apiKey)
+        }
+
+        try {
+            val response = client.newCall(requestBuilder.build()).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
+
+            val bodyStr = response.body?.string() ?: "[]"
+            val array = org.json.JSONArray(bodyStr)
+            val list = mutableListOf<ChatMessage>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val senderStr = obj.optString("sender", "USER")
+                val sender = if (senderStr.equals("HERMES", ignoreCase = true)) MessageSender.HERMES else MessageSender.USER
+                list.add(
+                    ChatMessage(
+                        id = obj.optString("id", i.toString()),
+                        sender = sender,
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                        content = obj.optString("content", "")
+                    )
+                )
+            }
+            Result.success(list)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createNewSession(config: ConnectionConfig, title: String? = null, model: String? = null): Result<HermesSession> = withContext(Dispatchers.IO) {
+        val url = "${config.baseUrl}/api/sessions/new"
+        val payload = JSONObject().apply {
+            if (!title.isNullOrBlank()) put("title", title)
+            if (!model.isNullOrBlank()) put("model", model)
+        }
+        val body = payload.toString().toRequestBody("application/json".toMediaType())
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .post(body)
+
+        if (config.apiKey.isNotBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer ${config.apiKey}")
+            requestBuilder.addHeader("X-API-Key", config.apiKey)
+        }
+
+        try {
+            val response = client.newCall(requestBuilder.build()).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
+
+            val bodyStr = response.body?.string() ?: "{}"
+            val obj = JSONObject(bodyStr)
+            val session = HermesSession(
+                id = obj.getString("id"),
+                title = obj.optString("title", "New Session"),
+                model = obj.optString("model", model ?: "default"),
+                startedAt = obj.optLong("started_at", System.currentTimeMillis()),
+                messageCount = 0
+            )
+            Result.success(session)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchModels(config: ConnectionConfig): Result<List<AiModelInfo>> = withContext(Dispatchers.IO) {
+        val url = "${config.baseUrl}/api/models"
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .get()
+
+        if (config.apiKey.isNotBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer ${config.apiKey}")
+            requestBuilder.addHeader("X-API-Key", config.apiKey)
+        }
+
+        try {
+            val response = client.newCall(requestBuilder.build()).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
+
+            val bodyStr = response.body?.string() ?: "{}"
+            val json = JSONObject(bodyStr)
+            val array = json.optJSONArray("models") ?: org.json.JSONArray()
+            val list = mutableListOf<AiModelInfo>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    AiModelInfo(
+                        id = obj.getString("id"),
+                        displayName = obj.optString("displayName", obj.getString("id")),
+                        provider = obj.optString("provider", "Host PC"),
+                        description = obj.optString("description", ""),
+                        isDefault = i == 0
+                    )
+                )
+            }
+            Result.success(list)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun streamChat(
         config: ConnectionConfig,
         prompt: String,
-        model: String
+        model: String,
+        sessionId: String? = null
     ): Flow<StreamChunk> = flow {
         // First try standard Hermes Agent SSE endpoint
         val primaryUrl = "${config.baseUrl}/api/chat/stream"
         val hermesPayload = JSONObject().apply {
             put("prompt", prompt)
             put("model", model)
+            if (!sessionId.isNullOrBlank()) {
+                put("session_id", sessionId)
+            }
         }
 
         val requestBody = hermesPayload.toString().toRequestBody("application/json".toMediaType())

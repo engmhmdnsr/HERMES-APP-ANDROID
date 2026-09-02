@@ -14,6 +14,8 @@ import com.example.model.AvailableAiModels
 import com.example.model.ChatMessage
 import com.example.model.ConnectionConfig
 import com.example.model.ConnectionStatus
+import com.example.model.DiscoveredGateway
+import com.example.model.HermesSession
 import com.example.model.HermesStrings
 import com.example.model.MessageSender
 import com.example.model.SystemTelemetry
@@ -71,6 +73,24 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _appLanguage = MutableStateFlow(prefsRepo.getAppLanguage())
     val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
 
+    private val _discoveredGateway = MutableStateFlow<DiscoveredGateway?>(null)
+    val discoveredGateway: StateFlow<DiscoveredGateway?> = _discoveredGateway.asStateFlow()
+
+    private val _isDiscovering = MutableStateFlow(false)
+    val isDiscovering: StateFlow<Boolean> = _isDiscovering.asStateFlow()
+
+    private val _sessions = MutableStateFlow<List<HermesSession>>(emptyList())
+    val sessions: StateFlow<List<HermesSession>> = _sessions.asStateFlow()
+
+    private val _currentSessionId = MutableStateFlow<String?>(null)
+    val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
+
+    private val _availableModels = MutableStateFlow<List<AiModelInfo>>(AvailableAiModels)
+    val availableModels: StateFlow<List<AiModelInfo>> = _availableModels.asStateFlow()
+
+    private val _isLoadingSessions = MutableStateFlow(false)
+    val isLoadingSessions: StateFlow<Boolean> = _isLoadingSessions.asStateFlow()
+
     private var telemetryPollingJob: Job? = null
     private var streamingJob: Job? = null
 
@@ -78,6 +98,87 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         // Initialize with helpful welcome message from Hermes Agent
         seedInitialWelcomeMessage()
         startTelemetryPolling()
+        startAutoDiscovery()
+        if (!_config.value.isDemoMode) {
+            testPing()
+        }
+    }
+
+    fun startAutoDiscovery() {
+        if (_isDiscovering.value) return
+        viewModelScope.launch {
+            _isDiscovering.value = true
+            _discoveredGateway.value = null
+            val result = networkClient.discoverLocalGateway(2500)
+            _discoveredGateway.value = result
+            _isDiscovering.value = false
+        }
+    }
+
+    fun connectDiscovered(discovered: DiscoveredGateway, useTailscale: Boolean = false) {
+        val targetIp = if (useTailscale && !discovered.tailscaleIp.isNullOrBlank()) {
+            discovered.tailscaleIp
+        } else {
+            discovered.ip
+        }
+        val updated = _config.value.copy(
+            tailscaleIp = targetIp,
+            port = discovered.port,
+            apiKey = discovered.apiKey.ifEmpty { _config.value.apiKey },
+            isDemoMode = false,
+            useCustomGatewayUrl = false
+        )
+        updateConnectionConfig(updated)
+    }
+
+    fun importFromQr(raw: String): Boolean {
+        try {
+            val trimmed = raw.trim()
+            if (trimmed.startsWith("hermes://connect")) {
+                val uri = android.net.Uri.parse(trimmed)
+                val ip = uri.getQueryParameter("ip") ?: uri.getQueryParameter("tailscale_ip") ?: "127.0.0.1"
+                val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 8080
+                val key = uri.getQueryParameter("key") ?: ""
+                val updated = _config.value.copy(
+                    tailscaleIp = ip,
+                    port = port,
+                    apiKey = key.ifEmpty { _config.value.apiKey },
+                    isDemoMode = false,
+                    useCustomGatewayUrl = false
+                )
+                updateConnectionConfig(updated)
+                return true
+            } else if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                val json = org.json.JSONObject(trimmed)
+                val ip = json.optString("ip", json.optString("tailscale_ip", "127.0.0.1"))
+                val port = json.optInt("port", 8080)
+                val key = json.optString("key", json.optString("apiKey", ""))
+                val updated = _config.value.copy(
+                    tailscaleIp = ip,
+                    port = port,
+                    apiKey = key.ifEmpty { _config.value.apiKey },
+                    isDemoMode = false,
+                    useCustomGatewayUrl = false
+                )
+                updateConnectionConfig(updated)
+                return true
+            } else if (trimmed.contains(":")) {
+                val parts = trimmed.split(":")
+                val ip = parts[0].trim()
+                val port = parts[1].toIntOrNull() ?: 8080
+                val updated = _config.value.copy(
+                    tailscaleIp = ip,
+                    port = port,
+                    isDemoMode = false,
+                    useCustomGatewayUrl = false
+                )
+                updateConnectionConfig(updated)
+                return true
+            }
+        } catch (_: Exception) {
+            return false
+        }
+        return false
     }
 
     fun setAppLanguage(language: AppLanguage) {
@@ -175,6 +276,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 val res = networkClient.ping(currentConfig)
                 if (res.isSuccess) {
                     _connectionStatus.value = ConnectionStatus.CONNECTED
+                    loadSessions()
+                    refreshModels()
                 } else {
                     _connectionStatus.value = ConnectionStatus.ERROR
                 }
@@ -182,6 +285,71 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             }
             _pingResult.value = result
             _isPinging.value = false
+        }
+    }
+
+    fun loadSessions() {
+        if (_config.value.isDemoMode) return
+        viewModelScope.launch {
+            _isLoadingSessions.value = true
+            val result = networkClient.fetchSessions(_config.value)
+            result.onSuccess { list ->
+                _sessions.value = list
+                if (_currentSessionId.value == null && list.isNotEmpty()) {
+                    selectSession(list.first().id)
+                }
+            }
+            _isLoadingSessions.value = false
+        }
+    }
+
+    fun selectSession(sessionId: String) {
+        _currentSessionId.value = sessionId
+        if (_config.value.isDemoMode) return
+        viewModelScope.launch {
+            val result = networkClient.fetchSessionMessages(_config.value, sessionId)
+            result.onSuccess { msgs ->
+                if (msgs.isNotEmpty()) {
+                    _chatMessages.value = msgs
+                }
+            }
+        }
+    }
+
+    fun createNewSession(title: String? = null) {
+        viewModelScope.launch {
+            if (_config.value.isDemoMode) {
+                _chatMessages.value = emptyList()
+                seedInitialWelcomeMessage()
+                return@launch
+            }
+            val result = networkClient.createNewSession(_config.value, title, _selectedModel.value.id)
+            result.onSuccess { newSession ->
+                _sessions.update { listOf(newSession) + it }
+                _currentSessionId.value = newSession.id
+                _chatMessages.value = listOf(
+                    ChatMessage(
+                        id = System.currentTimeMillis().toString(),
+                        sender = MessageSender.HERMES,
+                        content = "Connected to new session: ${newSession.title}\nHost PC is ready for commands & chat."
+                    )
+                )
+            }
+        }
+    }
+
+    fun refreshModels() {
+        if (_config.value.isDemoMode) return
+        viewModelScope.launch {
+            val result = networkClient.fetchModels(_config.value)
+            result.onSuccess { models ->
+                if (models.isNotEmpty()) {
+                    _availableModels.value = models
+                    if (models.none { it.id == _selectedModel.value.id }) {
+                        _selectedModel.value = models.first()
+                    }
+                }
+            }
         }
     }
 
@@ -219,7 +387,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     lang = _appLanguage.value
                 )
             } else {
-                networkClient.streamChat(_config.value, trimmed, _selectedModel.value.id)
+                networkClient.streamChat(_config.value, trimmed, _selectedModel.value.id, _currentSessionId.value)
             }
 
             streamFlow.collect { chunk ->
