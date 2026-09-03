@@ -89,6 +89,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     private var telemetryPollingJob: Job? = null
     private var streamingJob: Job? = null
+    private var chatPollingJob: Job? = null
     private var pendingSend: String? = null
     private var pendingAttachments: List<String> = emptyList()
 
@@ -96,6 +97,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         // Start with empty chat (no fake welcome) until a session loads.
         _chatMessages.value = emptyList()
         startTelemetryPolling()
+        startChatPolling()
         // If the user already has a saved config, try connecting automatically.
         if (_config.value.tailscaleIp.isNotBlank()) {
             testPing()
@@ -166,11 +168,38 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         _activeTab.value = tab
     }
 
+    /**
+     * Poll the current session for new messages every 5s while connected.
+     * This keeps the chat live when messages arrive from elsewhere
+     * (desktop app, Telegram, another device) without manual refresh.
+     * Only runs when NOT streaming (the stream already appends live).
+     */
+    private fun startChatPolling() {
+        chatPollingJob?.cancel()
+        chatPollingJob = viewModelScope.launch {
+            while (isActive) {
+                val sid = _currentSessionId.value
+                val streaming = _isStreaming.value
+                val hasConfig = _config.value.tailscaleIp.isNotBlank()
+                if (sid != null && !streaming && hasConfig) {
+                    val result = networkClient.fetchSessionMessages(_config.value, sid)
+                    result.onSuccess { msgs ->
+                        if (msgs.isNotEmpty() && msgs != _chatMessages.value) {
+                            _chatMessages.value = msgs
+                        }
+                    }
+                }
+                delay(5000)
+            }
+        }
+    }
+
     fun updateConnectionConfig(newConfig: ConnectionConfig) {
         _config.value = newConfig
         prefsRepo.saveConnectionConfig(newConfig)
         testPing()
         startTelemetryPolling()
+        startChatPolling()
     }
 
     fun testPing() {
