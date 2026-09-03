@@ -24,9 +24,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -109,6 +112,11 @@ fun GatewayConfigScreen(
     logs: List<HermesAppLog.LogEntry> = emptyList(),
     onRefreshLogs: () -> Unit = {},
     onClearLogs: () -> Unit = {},
+    savedProfiles: List<String> = emptyList(),
+    activeProfile: String = "",
+    onSaveProfile: (String) -> Unit = {},
+    onLoadProfile: (String) -> Unit = {},
+    onDeleteProfile: (String) -> Unit = {},
     discoveredGateway: DiscoveredGateway? = null,
     isDiscovering: Boolean = false,
     onStartAutoDiscovery: () -> Unit = {},
@@ -125,6 +133,7 @@ fun GatewayConfigScreen(
     var remoteGatewayUrlInput by remember(config.remoteGatewayUrl) { mutableStateOf(config.remoteGatewayUrl) }
     var useCustomGatewayUrl by remember(config.useCustomGatewayUrl) { mutableStateOf(config.useCustomGatewayUrl) }
     var useHttpsInput by remember(config.useHttps) { mutableStateOf(config.useHttps) }
+    var profileNameInput by remember { mutableStateOf("") }
     var isKeyVisible by remember { mutableStateOf(false) }
     var apiKeyCopied by remember { mutableStateOf(false) }
 
@@ -425,6 +434,99 @@ fun GatewayConfigScreen(
                                 text = HermesStrings.applyButton(language),
                                 style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonCyan)
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ===== Saved connection profiles =====
+        SectionCard {
+            Text(
+                text = if (language == AppLanguage.AR) "الاتصالات المحفوظة" else "SAVED CONNECTIONS",
+                style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NeonViolet)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Save current as named profile
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = profileNameInput,
+                    onValueChange = { profileNameInput = it },
+                    label = { Text(if (language == AppLanguage.AR) "اسم الاتصال" else "Connection name", style = MonospaceStyle.copy(fontSize = 10.sp)) },
+                    placeholder = { Text(if (language == AppLanguage.AR) "مثال: لابتوب البيت" else "e.g. Home laptop", style = MonospaceStyle.copy(fontSize = 10.sp)) },
+                    singleLine = true,
+                    textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
+                    colors = fieldColors(),
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        if (profileNameInput.isNotBlank()) {
+                            onSaveProfile(profileNameInput.trim())
+                            profileNameInput = ""
+                        }
+                    },
+                    enabled = profileNameInput.isNotBlank() && config.tailscaleIp.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonViolet),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.height(42.dp)
+                ) {
+                    Text(
+                        text = if (language == AppLanguage.AR) "حفظ" else "SAVE",
+                        style = MonospaceStyle.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Profile list
+            if (savedProfiles.isEmpty()) {
+                Text(
+                    text = if (language == AppLanguage.AR) "لا توجد اتصالات محفوظة. املأ البيانات وحفظها باسم." else "No saved connections. Fill in the details and save with a name.",
+                    style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                )
+            } else {
+                savedProfiles.forEach { name ->
+                    val isActive = name == activeProfile
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isActive) NeonViolet.copy(alpha = 0.15f) else CyberSurfaceElevated)
+                            .border(1.dp, if (isActive) NeonViolet else CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                            .clickable { onLoadProfile(name) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isActive) Icons.Default.CheckCircle else Icons.Default.Save,
+                            contentDescription = null,
+                            tint = if (isActive) NeonGreen else TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = name,
+                            style = MonospaceStyle.copy(
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isActive) NeonGreen else TextPrimary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        // Load icon (tap row loads too, but give explicit hint)
+                        if (!isActive) {
+                            Icon(Icons.Default.Save, contentDescription = "Load", tint = NeonCyan, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        IconButton(onClick = { onDeleteProfile(name) }, modifier = Modifier.size(22.dp)) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NeonRed, modifier = Modifier.size(14.dp))
                         }
                     }
                 }

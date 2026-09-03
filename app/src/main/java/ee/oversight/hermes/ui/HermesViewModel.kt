@@ -217,6 +217,34 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         startChatPolling()
     }
 
+    // ---- Named connection profiles ----
+
+    fun getSavedProfileNames(): List<String> = prefsRepo.getSavedProfileNames()
+
+    fun saveCurrentAsProfile(name: String) {
+        if (name.isBlank()) return
+        prefsRepo.saveProfile(name.trim(), _config.value)
+        prefsRepo.setActiveProfileName(name.trim())
+        HermesAppLog.info("Saved connection profile: ${name.trim()}")
+    }
+
+    fun loadProfile(name: String) {
+        val cfg = prefsRepo.getProfileConfig(name) ?: return
+        prefsRepo.setActiveProfileName(name)
+        updateConnectionConfig(cfg)
+        HermesAppLog.info("Loaded connection profile: $name")
+    }
+
+    fun deleteProfile(name: String) {
+        prefsRepo.deleteProfile(name)
+        if (prefsRepo.getActiveProfileName() == name) {
+            prefsRepo.setActiveProfileName("")
+        }
+        HermesAppLog.info("Deleted connection profile: $name")
+    }
+
+    fun getActiveProfileName(): String = prefsRepo.getActiveProfileName()
+
     fun testPing() {
         viewModelScope.launch {
             _isPinging.value = true
