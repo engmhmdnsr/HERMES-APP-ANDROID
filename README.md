@@ -2,11 +2,11 @@
 
 Mobile control center for **Hermes Agent** running on a Windows PC, reached securely over **Tailscale**. Browse sessions, read chat history, switch models, send prompts with live SSE streaming + tool execution blocks, and check gateway health.
 
-This app talks to the **official Hermes API server** built into Hermes Agent (the `api_server` gateway platform) — no custom FastAPI shim required.
+This app talks to the **official Hermes API server** built into Hermes Agent (the `api_server` gateway platform) - no custom FastAPI shim required.
 
 ---
 
-## Architecture (v4 — official API server)
+## Architecture (v4 - official API server)
 
 ```
 ┌─────────────┐   HTTPS/Tailscale    ┌─────────────────────────────┐
@@ -56,7 +56,7 @@ curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8642/health
 # → {"status":"ok","platform":"hermes-agent","version":"0.20.x"}
 ```
 
-> The API server binds to the **Tailscale IP only** — never `0.0.0.0` — so it is not exposed to the public internet. Keep the key secret; it gates full agent control (tools run as your Windows user).
+> The API server binds to the **Tailscale IP only** - never `0.0.0.0` - so it is not exposed to the public internet. Keep the key secret; it gates full agent control (tools run as your Windows user).
 
 ---
 
@@ -65,7 +65,7 @@ curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8642/health
 1. Install the APK (`HermesControl-debug.apk` or `app/build/outputs/apk/debug/app-debug.apk`).
 2. Open **Gateway** tab.
 3. Enter your PC's **Tailscale IP** (e.g. `100.124.105.88`), **port** `8642`, and the **API_SERVER_KEY** from `.env`.
-4. Tap **TEST PING** — you should see `PEER HANDSHAKE SUCCESSFUL`.
+4. Tap **TEST PING** - you should see `PEER HANDSHAKE SUCCESSFUL`.
 5. The app auto-loads your sessions and the live model list.
 
 ### QR pairing (optional)
@@ -115,6 +115,21 @@ Prereqs: JDK 17+, Android SDK with platform 36.
 ./gradlew assembleDebug
 # APK: app/build/outputs/apk/debug/app-debug.apk
 ```
+
+## End-to-end verification (PC side)
+
+After enabling the API server, run the same flow the app performs (health,
+sessions, model catalog, create session, lock model, SSE stream):
+
+```bash
+python server/test_official_api.py
+# ALL CHECKS PASSED - app should connect and stream fine.
+```
+
+> The old custom gateway `server/hermes_gateway.py` (port 8080) is **not
+> needed anymore** - do NOT run it. It wrote directly into Hermes' state.db
+> and exposed an unauthenticated surface on `0.0.0.0`. The official API
+> server (8642) replaces it. The file remains in the repo for reference only.
 
 ---
 
