@@ -17,10 +17,6 @@ object HermesStrings {
         AppLanguage.AR -> "جاري الاتصال..."
         AppLanguage.EN -> "CONNECTING..."
     }
-    fun statusDemoMode(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "الوضع التجريبي"
-        AppLanguage.EN -> "DEMO MODE"
-    }
     fun statusDisconnected(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "غير متصل"
         AppLanguage.EN -> "OFFLINE"
@@ -28,22 +24,6 @@ object HermesStrings {
     fun statusError(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "خطأ في الاتصال"
         AppLanguage.EN -> "CONN ERROR"
-    }
-    fun simulated(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "محاكاة"
-        AppLanguage.EN -> "SIMULATED"
-    }
-    fun demoOn(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تجريبي نشط"
-        AppLanguage.EN -> "DEMO ON"
-    }
-    fun demoOff(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تجريبي معطل"
-        AppLanguage.EN -> "DEMO OFF"
-    }
-    fun clearChat(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "مسح المحادثة"
-        AppLanguage.EN -> "Clear Chat"
     }
 
     // Navigation Tabs
@@ -158,10 +138,6 @@ You can send instructions, execute system commands, and monitor CPU and memory i
     fun metricsTitle(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "مقاييس النظام والبوابة"
         AppLanguage.EN -> "SYSTEM & GATEWAY METRICS"
-    }
-    fun metricsSubtitleDemo(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "بيانات محاكاة العرض التجريبي المدمج"
-        AppLanguage.EN -> "Simulated Demo Engine"
     }
     fun metricsSubtitleLive(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "تم الاستعلام مباشرة من مضيف Windows 11"
@@ -285,14 +261,6 @@ You can send instructions, execute system commands, and monitor CPU and memory i
     }
 
     // Demo Mode
-    fun demoModeTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "الوضع التجريبي المدمج"
-        AppLanguage.EN -> "BUILT-IN DEMO MODE"
-    }
-    fun demoModeDesc(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تشغيل واجهات التطبيق بالكامل تفاعلياً بمحاكاة بث النصوص وتوليد بيانات الـ CPU/RAM دون الحاجة للاتصال بالكمبيوتر أو الإنترنت."
-        AppLanguage.EN -> "Interactive demo mode that simulates real-time text streaming, tool execution blocks, and live CPU/RAM metrics without requiring a connection to the host PC."
-    }
 
     // Network Parameters
     fun networkParamsTitle(lang: AppLanguage) = when (lang) {
@@ -342,14 +310,6 @@ You can send instructions, execute system commands, and monitor CPU and memory i
     fun remoteGatewayModeDesc(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "توجيه كافة أوامر الاستنتاج والتحكم البرمجي وبث SSE وقراءات الموارد عبر خادم البوابة البعيد على Windows 11."
         AppLanguage.EN -> "Route all agent commands, LLM inference, SSE text stream, and system telemetry through your remote Windows 11 gateway."
-    }
-    fun remoteGatewayActiveBadge(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "⚡ خاصية Remote Gateway نشطة"
-        AppLanguage.EN -> "⚡ REMOTE GATEWAY LIVE"
-    }
-    fun remoteGatewayInactiveBadge(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "🧪 وضع المحاكاة الداخلي"
-        AppLanguage.EN -> "🧪 LOCAL SIMULATION"
     }
     fun remoteGatewayToggle(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "تشغيل بخاصية Remote Gateway"
@@ -413,29 +373,9 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.AR -> "مفتاح Hermes API ليس اشتراكاً تشتريه من موقع، بل يعتمد على الطريقة التي تشغل بها النموذج:"
         AppLanguage.EN -> "Hermes API is not a closed service you buy from a website, it depends on how you run the model:"
     }
-    fun apiKeySourceOllama(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "1. عبر Ollama على Windows (بدون مفتاح مجاناً):\nإذا كنت تشغل Ollama (`ollama run hermes3`)، لا تحتاج لمفتاح إطلاقاً! اترك الحقل فارغاً أو اضغط 'بدون مفتاح'."
-        AppLanguage.EN -> "1. Via Ollama on Windows (No Key Needed):\nIf running Ollama (`ollama run hermes3`), no API key is required! Leave the field empty or click 'No Key'."
-    }
-    fun apiKeySourceLmStudio(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "2. عبر LM Studio على Windows (بدون مفتاح):\nشغّل Local Server في LM Studio، واضبط المنفذ على 1234. لا يلزم مفتاح."
-        AppLanguage.EN -> "2. Via LM Studio on Windows (No Key Needed):\nStart Local Server in LM Studio, set port to 1234. No API key required."
-    }
     fun apiKeySourceCustomServer(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "3. Hermes API Server الرسمي على الـ PC:" + "\n" + "المفتاح هو API_SERVER_KEY من ملف .env على جهازك (AppData/Local/hermes/.env)."
         AppLanguage.EN -> "3. Official Hermes API Server on your PC:" + "\n" + "The key is API_SERVER_KEY from the .env file on your PC (AppData/Local/hermes/.env)."
-    }
-    fun apiKeySourceOpenRouter(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "4. عبر الإنترنت (OpenRouter Cloud API):\nإذا كنت تريد تشغيل نموذج Hermes 3 سحابياً بدون جهازك، أنشئ حساباً مجانياً على openrouter.ai واحصل على مفتاح يبدأ بـ sk-or-v1-..."
-        AppLanguage.EN -> "4. Via Cloud (OpenRouter API):\nTo run Hermes 3 in the cloud without running a local PC server, get a key from openrouter.ai starting with sk-or-v1-..."
-    }
-    fun btnNoKeyNeeded(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "بدون مفتاح (Ollama / محلي)"
-        AppLanguage.EN -> "No Key Needed (Local)"
-    }
-    fun btnOpenRouterPreset(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "سحابي (OpenRouter)"
-        AppLanguage.EN -> "Cloud (OpenRouter)"
     }
 
     // Guide
@@ -467,14 +407,6 @@ To restrict gateway access strictly to authorized Tailscale peer traffic, run in
     }
 
     // Full Hermes Agent Server Script on Windows
-    fun fullHermesAgentTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "⚡ كود تشغيل سيرفر هرمز الكامل على Windows 11"
-        AppLanguage.EN -> "⚡ FULL HERMES AGENT WINDOWS 11 SERVER SCRIPT"
-    }
-    fun fullHermesAgentDesc(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "لتحكم كامل في الحاسوب (تنفيذ أوامر PowerShell، فحص المعالج والذاكرة، وبث ردود هرمز مع أدوات التشغيل Tool Calling)، شغّل هذا الكود الخفيف (FastAPI) على جهازك:"
-        AppLanguage.EN -> "For full PC control (PowerShell execution, CPU/RAM telemetry, streaming responses with Tool Calling blocks), run this lightweight FastAPI script on your PC:"
-    }
     fun copyServerScriptButton(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "نسخ كود السيرفر (hermes_server.py)"
         AppLanguage.EN -> "Copy Server Script (hermes_server.py)"
@@ -548,33 +480,5 @@ Setup steps on your Windows PC:
     fun autoDiscoverBtnRescan(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "إعادة البحث"
         AppLanguage.EN -> "Rescan"
-    }
-    fun qrPairTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "الاقتران السريع بـ QR Code"
-        AppLanguage.EN -> "QUICK PAIR WITH QR CODE"
-    }
-    fun qrPairDesc(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "امسح الـ QR الظاهر في شاشة الكمبيوتر أو الصق رابط الاقتران المباشر:"
-        AppLanguage.EN -> "Scan the QR from your PC terminal or paste the pairing link:"
-    }
-    fun qrBtnPaste(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "📋 لصق كود QR من الحافظة"
-        AppLanguage.EN -> "📋 Paste QR from Clipboard"
-    }
-    fun qrInputPlaceholder(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "الصق رابط hermes://connect أو بيانات الـ JSON هنا..."
-        AppLanguage.EN -> "Paste hermes://connect or JSON pairing string here..."
-    }
-    fun qrBtnApply(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تطبيق والاتصال"
-        AppLanguage.EN -> "Apply & Connect"
-    }
-    fun qrSuccessToast(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "✅ تم استيراد الإعدادات والاتصال بنجاح!"
-        AppLanguage.EN -> "✅ Settings imported & connected!"
-    }
-    fun qrErrorToast(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "⚠️ كود أو رابط غير صالح"
-        AppLanguage.EN -> "⚠️ Invalid QR Code or URI"
     }
 }

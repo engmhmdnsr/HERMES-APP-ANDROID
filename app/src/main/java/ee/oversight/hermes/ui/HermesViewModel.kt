@@ -15,7 +15,6 @@ import ee.oversight.hermes.model.ConnectionConfig
 import ee.oversight.hermes.model.ConnectionStatus
 import ee.oversight.hermes.model.DiscoveredGateway
 import ee.oversight.hermes.model.HermesSession
-import ee.oversight.hermes.model.HermesStrings
 import ee.oversight.hermes.model.MessageSender
 import ee.oversight.hermes.model.SystemTelemetry
 import ee.oversight.hermes.model.ToolStatus
@@ -127,53 +126,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             useCustomGatewayUrl = false
         )
         updateConnectionConfig(updated)
-    }
-
-    fun importFromQr(raw: String): Boolean {
-        try {
-            val trimmed = raw.trim()
-            if (trimmed.startsWith("hermes://connect")) {
-                val uri = android.net.Uri.parse(trimmed)
-                val ip = uri.getQueryParameter("ip") ?: uri.getQueryParameter("tailscale_ip") ?: "127.0.0.1"
-                val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 8080
-                val key = uri.getQueryParameter("key") ?: ""
-                val updated = _config.value.copy(
-                    tailscaleIp = ip,
-                    port = port,
-                    apiKey = key.ifEmpty { _config.value.apiKey },
-                    useCustomGatewayUrl = false
-                )
-                updateConnectionConfig(updated)
-                return true
-            } else if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-                val json = org.json.JSONObject(trimmed)
-                val ip = json.optString("ip", json.optString("tailscale_ip", "127.0.0.1"))
-                val port = json.optInt("port", 8080)
-                val key = json.optString("key", json.optString("apiKey", ""))
-                val updated = _config.value.copy(
-                    tailscaleIp = ip,
-                    port = port,
-                    apiKey = key.ifEmpty { _config.value.apiKey },
-                    useCustomGatewayUrl = false
-                )
-                updateConnectionConfig(updated)
-                return true
-            } else if (trimmed.contains(":")) {
-                val parts = trimmed.split(":")
-                val ip = parts[0].trim()
-                val port = parts[1].toIntOrNull() ?: 8080
-                val updated = _config.value.copy(
-                    tailscaleIp = ip,
-                    port = port,
-                    useCustomGatewayUrl = false
-                )
-                updateConnectionConfig(updated)
-                return true
-            }
-        } catch (_: Exception) {
-            return false
-        }
-        return false
     }
 
     fun setAppLanguage(language: AppLanguage) {

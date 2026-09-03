@@ -124,10 +124,3 @@ data class HermesSession(
     val startedAt: Long = 0L,
     val messageCount: Int = 0
 )
-
-// Provider grouping from /api/model/options (provider slug -> models)
-data class ModelProviderGroup(
-    val slug: String,
-    val name: String,
-    val models: List<String>
-)

@@ -86,7 +86,6 @@ fun MainScreen(
                 NavigationBar(
                     containerColor = CyberSurface,
                     modifier = Modifier
-                        .height(56.dp)
                         .border(width = 1.dp, color = CyberSurfaceBorder)
                         .testTag("main_navigation_bar")
                 ) {
@@ -231,8 +230,7 @@ fun MainScreen(
                             onSaveConfig = { viewModel.updateConnectionConfig(it) },
                             onTestPing = { viewModel.testPing() },
                             onStartAutoDiscovery = { viewModel.startAutoDiscovery() },
-                            onConnectDiscovered = { discovered, useTailscale -> viewModel.connectDiscovered(discovered, useTailscale) },
-                            onImportFromQr = { viewModel.importFromQr(it) }
+                            onConnectDiscovered = { discovered, useTailscale -> viewModel.connectDiscovered(discovered, useTailscale) }
                         )
                     }
                 }

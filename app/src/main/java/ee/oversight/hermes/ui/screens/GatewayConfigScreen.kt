@@ -102,7 +102,6 @@ fun GatewayConfigScreen(
     isDiscovering: Boolean = false,
     onStartAutoDiscovery: () -> Unit = {},
     onConnectDiscovered: (DiscoveredGateway, Boolean) -> Unit = { _, _ -> },
-    onImportFromQr: (String) -> Boolean = { false },
     modifier: Modifier = Modifier
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -114,6 +113,7 @@ fun GatewayConfigScreen(
     var apiKeyInput by remember(config.apiKey) { mutableStateOf(config.apiKey) }
     var remoteGatewayUrlInput by remember(config.remoteGatewayUrl) { mutableStateOf(config.remoteGatewayUrl) }
     var useCustomGatewayUrl by remember(config.useCustomGatewayUrl) { mutableStateOf(config.useCustomGatewayUrl) }
+    var useHttpsInput by remember(config.useHttps) { mutableStateOf(config.useHttps) }
     var isKeyVisible by remember { mutableStateOf(false) }
     var apiKeyCopied by remember { mutableStateOf(false) }
 
@@ -268,6 +268,28 @@ fun GatewayConfigScreen(
                             colors = fieldColors(),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Protocol choice: HTTP / HTTPS
+                        Text(
+                            text = if (language == AppLanguage.AR) "البروتوكول:" else "Protocol:",
+                            style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary),
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ChoicePill(
+                                text = "HTTP",
+                                selected = !useHttpsInput,
+                                accent = NeonGreen,
+                                onClick = { useHttpsInput = false }
+                            )
+                            ChoicePill(
+                                text = "HTTPS",
+                                selected = useHttpsInput,
+                                accent = NeonCyan,
+                                onClick = { useHttpsInput = true }
+                            )
+                        }
                     } else {
                         OutlinedTextField(
                             value = remoteGatewayUrlInput,
@@ -345,7 +367,7 @@ fun GatewayConfigScreen(
                                         remoteGatewayUrl = remoteGatewayUrlInput.trim(),
                                         useCustomGatewayUrl = useCustomGatewayUrl,
                                         apiKey = apiKeyInput.trim(),
-                                        useHttps = false
+                                        useHttps = useHttpsInput
                                     )
                                 )
                                 onTestPing()
@@ -378,7 +400,7 @@ fun GatewayConfigScreen(
                                         remoteGatewayUrl = remoteGatewayUrlInput.trim(),
                                         useCustomGatewayUrl = useCustomGatewayUrl,
                                         apiKey = apiKeyInput.trim(),
-                                        useHttps = false
+                                        useHttps = useHttpsInput
                                     )
                                 )
                             },

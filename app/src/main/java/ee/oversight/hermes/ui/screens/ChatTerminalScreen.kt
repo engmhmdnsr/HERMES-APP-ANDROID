@@ -174,7 +174,6 @@ fun ChatTerminalScreen(
         modifier = modifier
             .fillMaxSize()
             .background(CyberBg)
-            .imePadding()
     ) {
         // Model Selector Bar
         ModelSelectorRow(
@@ -404,7 +403,8 @@ fun ChatTerminalScreen(
             }
         }
 
-        // Bottom Input Bar
+        // Bottom Input Bar (imePadding only here so the bar sits above keyboard
+        // without pushing the whole chat content up / leaving a big gap)
         ChatInputBar(
             text = promptInput,
             language = language,
@@ -419,7 +419,8 @@ fun ChatTerminalScreen(
                     pendingImages = emptyList()
                 }
             },
-            onStop = onStopStreaming
+            onStop = onStopStreaming,
+            modifier = Modifier.imePadding()
         )
     }
 }
@@ -975,10 +976,11 @@ fun ChatInputBar(
     hasAttachments: Boolean = false,
     onAttachClick: () -> Unit = {},
     onSend: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF0A0E14))
             .border(width = 1.dp, color = CyberSurfaceBorder)
