@@ -2,7 +2,9 @@
 
 Mobile control center for **Hermes Agent** running on a Windows PC, reached securely over **Tailscale**. Browse sessions, read chat history, switch models, send prompts with live SSE streaming + tool execution blocks, and check gateway health.
 
-This app talks to the **official Hermes API server** built into Hermes Agent (the `api_server` gateway platform) - no custom FastAPI shim required.
+> **Public release** — this app is **generic**: every user connects to **their own** Hermes PC. No author-specific IPs or keys are baked in. Package ID: `ee.oversight.hermes`. Built by [Oversight EE](https://cyber.oversight.ee).
+
+This app talks to the **official Hermes API server** built into Hermes Agent (the `api_server` gateway platform) — no custom FastAPI shim required.
 
 ---
 
@@ -19,7 +21,7 @@ This app talks to the **official Hermes API server** built into Hermes Agent (th
                                    └─────────────────────────────┘
 ```
 
-The **old custom FastAPI gateway** (`server/hermes_gateway.py`, port 8080) wrote directly into Hermes' `state.db` and is **no longer needed**. It has been replaced by the official API server, which runs inside the gateway process and uses Hermes' own session store safely. The `server/` folder is kept for reference only.
+The **old custom FastAPI gateway** (`server/hermes_gateway.py`, port 8080) wrote directly into Hermes' `state.db` and is **no longer needed**. It has been replaced by the official API server, which runs inside the gateway process and uses Hermes' own session store safely. The legacy server files were removed from this repo; only the E2E test script remains under `server/`.
 
 ---
 
@@ -126,10 +128,10 @@ python server/test_official_api.py
 # ALL CHECKS PASSED - app should connect and stream fine.
 ```
 
-> The old custom gateway `server/hermes_gateway.py` (port 8080) is **not
-> needed anymore** - do NOT run it. It wrote directly into Hermes' state.db
-> and exposed an unauthenticated surface on `0.0.0.0`. The official API
-> server (8642) replaces it. The file remains in the repo for reference only.
+> The old custom gateway (port 8080, FastAPI shim) is **not needed anymore** -
+> do NOT run it. It wrote directly into Hermes' state.db and exposed an
+> unauthenticated surface on `0.0.0.0`. The official API server (8642)
+> replaces it.
 
 ---
 
@@ -155,5 +157,5 @@ app/src/main/java/com/example/
   model/HermesServerScript.kt     # PC setup guide (official API server)
   ui/HermesViewModel.kt           # State + orchestration
   ui/screens/                     # ChatTerminal / SystemMonitoring / GatewayConfig
-server/                           # (legacy, for reference only)
+server/test_official_api.py       # E2E verification against the live API server
 ```

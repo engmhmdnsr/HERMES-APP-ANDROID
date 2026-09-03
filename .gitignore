@@ -14,3 +14,8 @@ debug.keystore
 /.idea/
 __pycache__/
 *.pyc
+
+# Release signing (never commit!)
+*.jks
+keystore-credentials.txt
+*.apk

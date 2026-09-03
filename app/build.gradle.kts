@@ -10,7 +10,7 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
+  namespace = "ee.oversight.hermes"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
@@ -25,11 +25,12 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      // Look for the keystore in the project root first, then env var override.
+      val envPath = System.getenv("KEYSTORE_PATH")
+      storeFile = file(envPath ?: "${rootDir}/hermes-control-release.jks")
+      storePassword = System.getenv("STORE_PASSWORD") ?: "change-me-store"
+      keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+      keyPassword = System.getenv("KEY_PASSWORD") ?: "change-me-key"
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
