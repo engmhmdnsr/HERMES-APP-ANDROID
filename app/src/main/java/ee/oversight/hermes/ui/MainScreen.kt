@@ -68,6 +68,7 @@ fun MainScreen(
     val currentSessionId by viewModel.currentSessionId.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val isLoadingSessions by viewModel.isLoadingSessions.collectAsState()
+    val appLogs by viewModel.appLogs.collectAsState()
 
     val layoutDirection = if (language == AppLanguage.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
 
@@ -224,6 +225,9 @@ fun MainScreen(
                             pingResult = pingResult,
                             isPinging = isPinging,
                             language = language,
+                            logs = appLogs,
+                            onRefreshLogs = { viewModel.refreshLogs() },
+                            onClearLogs = { viewModel.clearLogs() },
                             discoveredGateway = discoveredGateway,
                             isDiscovering = isDiscovering,
                             onLanguageChange = { viewModel.setAppLanguage(it) },

@@ -3,6 +3,7 @@ package ee.oversight.hermes.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import ee.oversight.hermes.data.HermesAppLog
 import ee.oversight.hermes.data.HermesNetworkClient
 import ee.oversight.hermes.data.HermesPreferencesRepository
 import ee.oversight.hermes.data.PingResult
@@ -87,6 +88,19 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _isLoadingSessions = MutableStateFlow(false)
     val isLoadingSessions: StateFlow<Boolean> = _isLoadingSessions.asStateFlow()
 
+    // In-app logs (viewable from Gateway -> About)
+    private val _appLogs = MutableStateFlow<List<HermesAppLog.LogEntry>>(HermesAppLog.all())
+    val appLogs: StateFlow<List<HermesAppLog.LogEntry>> = _appLogs.asStateFlow()
+
+    fun refreshLogs() {
+        _appLogs.value = HermesAppLog.all()
+    }
+
+    fun clearLogs() {
+        HermesAppLog.clear()
+        _appLogs.value = emptyList()
+    }
+
     private var telemetryPollingJob: Job? = null
     private var streamingJob: Job? = null
     private var chatPollingJob: Job? = null
@@ -169,10 +183,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Poll the current session for new messages every 5s while connected.
-     * This keeps the chat live when messages arrive from elsewhere
-     * (desktop app, Telegram, another device) without manual refresh.
-     * Only runs when NOT streaming (the stream already appends live).
+     * Poll the current session for new messages periodically.
+     * Keeps the chat live when messages arrive from elsewhere without
+     * manual refresh. Skips polling while streaming (SSE already appends
+     * live deltas) and while the chat tab is not visible to reduce load.
      */
     private fun startChatPolling() {
         chatPollingJob?.cancel()
@@ -181,7 +195,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 val sid = _currentSessionId.value
                 val streaming = _isStreaming.value
                 val hasConfig = _config.value.tailscaleIp.isNotBlank()
-                if (sid != null && !streaming && hasConfig) {
+                val chatVisible = _activeTab.value == AppTab.TERMINAL
+                if (sid != null && !streaming && hasConfig && chatVisible) {
                     val result = networkClient.fetchSessionMessages(_config.value, sid)
                     result.onSuccess { msgs ->
                         if (msgs.isNotEmpty() && msgs != _chatMessages.value) {
@@ -189,7 +204,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                 }
-                delay(5000)
+                delay(8000)
             }
         }
     }
@@ -206,19 +221,23 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _isPinging.value = true
             _connectionStatus.value = ConnectionStatus.CONNECTING
+            HermesAppLog.info("Testing connection to ${_config.value.effectiveGatewayUrl}...")
             val currentConfig = _config.value
             if (currentConfig.tailscaleIp.isBlank()) {
                 _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                HermesAppLog.warn("No gateway IP configured yet")
                 _isPinging.value = false
                 return@launch
             }
             val res = networkClient.ping(currentConfig)
             if (res.isSuccess) {
                 _connectionStatus.value = ConnectionStatus.CONNECTED
+                HermesAppLog.info("Connected: ${res.message}")
                 loadSessions()
                 refreshModels()
             } else {
                 _connectionStatus.value = ConnectionStatus.ERROR
+                HermesAppLog.error("Connection failed: ${res.message}")
             }
             _pingResult.value = res
             _isPinging.value = false
@@ -244,6 +263,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectSession(sessionId: String) {
         _currentSessionId.value = sessionId
+        HermesAppLog.info("Opened session: ${sessionId.take(20)}...")
         // Show session's model in the picker if known
         val s = _sessions.value.find { it.id == sessionId }
         if (s != null && s.model.isNotBlank() && s.model != "default") {
@@ -287,6 +307,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val result = networkClient.createNewSession(_config.value, title, _selectedModel.value.id)
             result.onSuccess { newSession ->
+                HermesAppLog.info("Created new session: ${newSession.id.take(20)}...")
                 _sessions.update { listOf(newSession) + it }
                 _currentSessionId.value = newSession.id
                 // Lock the currently selected model on the new session
@@ -396,6 +417,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
         _chatMessages.update { it + userMessage + agentInitialMessage }
         _isStreaming.value = true
+        HermesAppLog.info("Sending to session ${_currentSessionId.value} [${_selectedModel.value.id}]${if (attachments.isNotEmpty()) " + ${attachments.size} attachment(s)" else ""}")
 
         streamingJob?.cancel()
         streamingJob = viewModelScope.launch {
@@ -442,6 +464,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     is StreamChunk.Error -> {
+                        HermesAppLog.error("Stream error: ${chunk.message}")
                         _chatMessages.update { list ->
                             list.map { msg ->
                                 if (msg.id == agentMessageId) {
@@ -454,6 +477,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     StreamChunk.Done -> {
+                        HermesAppLog.info("Stream completed")
                         _chatMessages.update { list ->
                             list.map { msg ->
                                 if (msg.id == agentMessageId) {

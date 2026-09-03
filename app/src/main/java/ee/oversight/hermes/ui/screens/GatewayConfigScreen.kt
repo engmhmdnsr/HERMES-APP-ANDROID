@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -65,6 +68,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ee.oversight.hermes.data.PingResult
+import ee.oversight.hermes.data.HermesAppLog
 import ee.oversight.hermes.model.AppLanguage
 import ee.oversight.hermes.model.ConnectionConfig
 import ee.oversight.hermes.model.ConnectionStatus
@@ -102,6 +106,9 @@ fun GatewayConfigScreen(
     onLanguageChange: (AppLanguage) -> Unit,
     onSaveConfig: (ConnectionConfig) -> Unit,
     onTestPing: () -> Unit,
+    logs: List<HermesAppLog.LogEntry> = emptyList(),
+    onRefreshLogs: () -> Unit = {},
+    onClearLogs: () -> Unit = {},
     discoveredGateway: DiscoveredGateway? = null,
     isDiscovering: Boolean = false,
     onStartAutoDiscovery: () -> Unit = {},
@@ -493,6 +500,71 @@ fun GatewayConfigScreen(
             }
             Spacer(modifier = Modifier.height(10.dp))
         }
+
+        // ===== App Logs =====
+        SectionCard {
+            // Header with refresh + clear
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, null, tint = NeonViolet, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "APP LOGS",
+                        style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonViolet)
+                    )
+                }
+                Row {
+                    // Refresh button
+                    IconButton(onClick = onRefreshLogs, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextSecondary, modifier = Modifier.size(14.dp))
+                    }
+                    // Clear button
+                    IconButton(onClick = onClearLogs, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextSecondary, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Log list (monospace, scrollable, capped height)
+            if (logs.isEmpty()) {
+                Text(
+                    text = if (language == AppLanguage.AR) "لا توجد سجلات بعد." else "No logs yet.",
+                    style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary),
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 200.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF0A0E14))
+                        .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                        .padding(8.dp)
+                ) {
+                    // Show most recent first (reversed)
+                    logs.reversed().forEach { entry ->
+                        val color = when (entry.level) {
+                            "ERROR" -> NeonRed
+                            "WARN" -> Color(0xFFF59E0B)
+                            else -> TextSecondary
+                        }
+                        Text(
+                            text = HermesAppLog.formatEntry(entry),
+                            style = MonospaceStyle.copy(fontSize = 9.sp, color = color, lineHeight = 12.sp),
+                            maxLines = 3
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         // ===== About us =====
         SectionCard {

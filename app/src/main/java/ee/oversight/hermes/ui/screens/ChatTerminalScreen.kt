@@ -81,6 +81,7 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.ui.graphics.asImageBitmap
 import java.io.ByteArrayOutputStream
+import ee.oversight.hermes.data.HermesAppLog
 import ee.oversight.hermes.model.AiModelInfo
 import ee.oversight.hermes.model.AppLanguage
 import ee.oversight.hermes.model.AvailableAiModels
@@ -171,7 +172,10 @@ fun ChatTerminalScreen(
                     val uploaded = uploadFileToGateway(config, context, uri, fileName)
                     isUploading = false
                     if (uploaded != null) {
+                        HermesAppLog.info("File uploaded: $fileName -> ${uploaded.first}")
                         pendingFiles = pendingFiles + uploaded
+                    } else {
+                        HermesAppLog.error("File upload failed: $fileName")
                     }
                 }
             }
