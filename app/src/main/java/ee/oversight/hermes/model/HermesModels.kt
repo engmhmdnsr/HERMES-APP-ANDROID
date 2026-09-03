@@ -94,7 +94,8 @@ data class ChatMessage(
     val content: String = "",
     val modelName: String? = null,
     val isStreaming: Boolean = false,
-    val toolExecutions: List<ToolExecutionBlock> = emptyList()
+    val toolExecutions: List<ToolExecutionBlock> = emptyList(),
+    val attachments: List<String> = emptyList() // image data URLs (base64) attached to user msg
 )
 
 data class AiModelInfo(

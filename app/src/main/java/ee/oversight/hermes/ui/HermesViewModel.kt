@@ -91,6 +91,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private var telemetryPollingJob: Job? = null
     private var streamingJob: Job? = null
     private var pendingSend: String? = null
+    private var pendingAttachments: List<String> = emptyList()
 
     init {
         // Start with empty chat (no fake welcome) until a session loads.
@@ -319,9 +320,11 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 // If a message was queued behind session creation, send it now.
                 val queued = thenSend ?: pendingSend
+                val queuedAttachments = pendingAttachments
                 pendingSend = null
-                if (queued != null) {
-                    doSendMessage(queued)
+                pendingAttachments = emptyList()
+                if (queued != null || queuedAttachments.isNotEmpty()) {
+                    doSendMessage(queued ?: "", queuedAttachments)
                 }
             }.onFailure { e ->
                 _chatMessages.update { list ->
@@ -375,26 +378,28 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun sendMessage(prompt: String) {
+    fun sendMessage(prompt: String, attachments: List<String> = emptyList()) {
         val trimmed = prompt.trim()
-        if (trimmed.isEmpty() || _isStreaming.value) return
+        if ((trimmed.isEmpty() && attachments.isEmpty()) || _isStreaming.value) return
 
         // If no session yet, create one and queue the message to send after.
         if (_currentSessionId.value == null) {
             pendingSend = trimmed
+            pendingAttachments = attachments
             createNewSession()
             return
         }
 
-        doSendMessage(trimmed)
+        doSendMessage(trimmed, attachments)
     }
 
-    private fun doSendMessage(trimmed: String) {
+    private fun doSendMessage(trimmed: String, attachments: List<String> = emptyList()) {
         val userMessage = ChatMessage(
             id = "user_${System.currentTimeMillis()}",
             sender = MessageSender.USER,
             content = trimmed,
-            timestamp = System.currentTimeMillis()
+            timestamp = System.currentTimeMillis(),
+            attachments = attachments
         )
 
         val agentMessageId = "hermes_${System.currentTimeMillis()}"
@@ -417,7 +422,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 _config.value,
                 trimmed,
                 _selectedModel.value.id,
-                _currentSessionId.value
+                _currentSessionId.value,
+                attachments
             )
 
             streamFlow.collect { chunk ->

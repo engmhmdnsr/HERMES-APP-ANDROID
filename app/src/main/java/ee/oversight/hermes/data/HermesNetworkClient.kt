@@ -444,12 +444,14 @@ class HermesNetworkClient {
     // SSE events: run.started, message.started, assistant.delta,
     //             tool.started/completed/failed, tool.progress,
     //             assistant.completed, run.completed, error, done
+    // Supports image attachments as data URLs -> multimodal content parts.
     // ------------------------------------------------------------------
     fun streamChat(
         config: ConnectionConfig,
         prompt: String,
         model: String,
-        sessionId: String? = null
+        sessionId: String? = null,
+        attachments: List<String> = emptyList()
     ): Flow<StreamChunk> = flow {
         // If no session id, create one first
         val resolvedSessionId = sessionId
@@ -459,8 +461,25 @@ class HermesNetworkClient {
         }
 
         val url = "${config.baseUrl}/api/sessions/$resolvedSessionId/chat/stream"
+        // Build multimodal message: text + image parts (native API server format)
+        val messagePayload: Any = if (attachments.isNotEmpty()) {
+            val parts = org.json.JSONArray()
+            if (prompt.isNotBlank()) {
+                parts.put(JSONObject().put("type", "text").put("text", prompt))
+            }
+            for (imgUrl in attachments) {
+                parts.put(
+                    JSONObject()
+                        .put("type", "image_url")
+                        .put("image_url", JSONObject().put("url", imgUrl))
+                )
+            }
+            parts
+        } else {
+            prompt
+        }
         val payload = JSONObject().apply {
-            put("message", prompt)
+            put("message", messagePayload)
             if (model.isNotBlank() && model != "default") {
                 put("model", model)
             }

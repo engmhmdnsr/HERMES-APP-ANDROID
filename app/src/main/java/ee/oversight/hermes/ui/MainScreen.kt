@@ -206,7 +206,7 @@ fun MainScreen(
                             onSelectSession = { viewModel.selectSession(it) },
                             onCreateNewSession = { viewModel.createNewSession() },
                             onRefreshSessions = { viewModel.loadSessions() },
-                            onSendMessage = { viewModel.sendMessage(it) },
+                            onSendMessage = { text, attachments -> viewModel.sendMessage(text, attachments) },
                             onStopStreaming = { viewModel.stopStreaming() }
                         )
                     }

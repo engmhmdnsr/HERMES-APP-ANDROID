@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -36,10 +37,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
@@ -67,6 +70,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.ui.graphics.asImageBitmap
+import java.io.ByteArrayOutputStream
 import ee.oversight.hermes.model.AiModelInfo
 import ee.oversight.hermes.model.AppLanguage
 import ee.oversight.hermes.model.AvailableAiModels
@@ -109,13 +122,29 @@ fun ChatTerminalScreen(
     onSelectSession: (String) -> Unit,
     onCreateNewSession: () -> Unit,
     onRefreshSessions: () -> Unit,
-    onSendMessage: (String) -> Unit,
+    onSendMessage: (String, List<String>) -> Unit,
     onStopStreaming: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var promptInput by remember { mutableStateOf("") }
     var showSessionsSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // Image attachments picked for the next message (data URLs)
+    var pendingImages by remember { mutableStateOf<List<String>>(emptyList()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Image picker launcher (opens system photo picker)
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents(),
+        onResult = { uris ->
+            if (uris.isNotEmpty()) {
+                val newImages = uris.mapNotNull { uri ->
+                    uriToCompressedDataUrl(context, uri)
+                }
+                pendingImages = pendingImages + newImages
+            }
+        }
+    )
     // Remember which session we already auto-scrolled to bottom for.
     // This prevents re-scrolling to the top every time the tab is reopened.
     var lastScrolledSession by remember { mutableStateOf<String?>(null) }
@@ -337,10 +366,43 @@ fun ChatTerminalScreen(
             language = language,
             onPresetClick = { prompt ->
                 promptInput = prompt
-                onSendMessage(prompt)
+                onSendMessage(prompt, emptyList())
                 promptInput = ""
             }
         )
+
+        // Image attachment previews (picked but not yet sent)
+        if (pendingImages.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                pendingImages.forEach { imgUrl ->
+                    Box {
+                        androidx.compose.foundation.Image(
+                            bitmap = dataUrlToBitmap(imgUrl).asImageBitmap(),
+                            contentDescription = "Attachment",
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        )
+                        // Remove (X) button
+                        IconButton(
+                            onClick = { pendingImages = pendingImages - imgUrl },
+                            modifier = Modifier
+                                .size(20.dp)
+                                .align(Alignment.TopEnd)
+                                .background(Color.Black.copy(alpha = 0.7f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(12.dp))
+                        }
+                    }
+                }
+            }
+        }
 
         // Bottom Input Bar
         ChatInputBar(
@@ -348,10 +410,13 @@ fun ChatTerminalScreen(
             language = language,
             onTextChange = { promptInput = it },
             isStreaming = isStreaming,
+            hasAttachments = pendingImages.isNotEmpty(),
+            onAttachClick = { imagePicker.launch("image/*") },
             onSend = {
-                if (promptInput.isNotBlank()) {
-                    onSendMessage(promptInput)
+                if (promptInput.isNotBlank() || pendingImages.isNotEmpty()) {
+                    onSendMessage(promptInput, pendingImages)
                     promptInput = ""
+                    pendingImages = emptyList()
                 }
             },
             onStop = onStopStreaming
@@ -700,14 +765,33 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                     .border(1.dp, NeonViolet.copy(alpha = 0.5f), RoundedCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomStart = 14.dp, bottomEnd = 14.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                Text(
-                    text = message.content,
-                    style = MonospaceStyle.copy(
-                        fontSize = 13.5.sp,
-                        color = TextPrimary,
-                        lineHeight = 20.sp
-                    )
-                )
+                Column {
+                    // Attachment images (if any)
+                    if (message.attachments.isNotEmpty()) {
+                        message.attachments.forEach { imgUrl ->
+                            androidx.compose.foundation.Image(
+                                bitmap = dataUrlToBitmap(imgUrl).asImageBitmap(),
+                                contentDescription = "Image",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 220.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+                    }
+                    if (message.content.isNotBlank()) {
+                        Text(
+                            text = message.content,
+                            style = MonospaceStyle.copy(
+                                fontSize = 13.5.sp,
+                                color = TextPrimary,
+                                lineHeight = 20.sp
+                            )
+                        )
+                    }
+                }
             }
         }
     } else {
@@ -888,6 +972,8 @@ fun ChatInputBar(
     language: AppLanguage,
     onTextChange: (String) -> Unit,
     isStreaming: Boolean,
+    hasAttachments: Boolean = false,
+    onAttachClick: () -> Unit = {},
     onSend: () -> Unit,
     onStop: () -> Unit
 ) {
@@ -899,6 +985,27 @@ fun ChatInputBar(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Attach (paperclip) button - pick images
+        if (!isStreaming) {
+            IconButton(
+                onClick = onAttachClick,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (hasAttachments) NeonCyan.copy(alpha = 0.2f) else Color.Transparent)
+                    .border(1.dp, if (hasAttachments) NeonCyan else Color(0xFF2E384D), CircleShape)
+                    .testTag("attach_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AttachFile,
+                    contentDescription = "Attach",
+                    tint = if (hasAttachments) NeonCyan else TextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+
         // Monospace Terminal Styled Input Field
         Box(
             modifier = Modifier
@@ -954,16 +1061,17 @@ fun ChatInputBar(
                 )
             }
         } else {
+            val canSend = text.isNotBlank() || hasAttachments
             IconButton(
                 onClick = onSend,
-                enabled = text.isNotBlank(),
+                enabled = canSend,
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(if (text.isNotBlank()) NeonViolet else Color(0xFF1F2633))
+                    .background(if (canSend) NeonViolet else Color(0xFF1F2633))
                     .border(
                         1.dp,
-                        if (text.isNotBlank()) NeonVioletLight else Color(0xFF2E384D),
+                        if (canSend) NeonVioletLight else Color(0xFF2E384D),
                         CircleShape
                     )
                     .testTag("send_button")
@@ -971,10 +1079,70 @@ fun ChatInputBar(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
                     contentDescription = HermesStrings.sendCommand(language),
-                    tint = if (text.isNotBlank()) Color.White else TextSecondary,
+                    tint = if (canSend) Color.White else TextSecondary,
                     modifier = Modifier.size(18.dp)
                 )
             }
         }
+    }
+}
+
+// ============ Attachment helpers ============
+
+/**
+ * Read a content Uri (image), downscale to max ~1280px, compress to JPEG,
+ * and return a base64 data URL suitable for the Hermes API vision input.
+ */
+private fun uriToCompressedDataUrl(context: Context, uri: Uri): String? {
+    return try {
+        val input = context.contentResolver.openInputStream(uri) ?: return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeStream(input, null, bounds)
+        input.close()
+
+        // Downscale if larger than 1280px
+        val maxDim = 1280
+        var sample = 1
+        val w = bounds.outWidth
+        val h = bounds.outHeight
+        while ((w / sample) > maxDim * 2 || (h / sample) > maxDim * 2) sample *= 2
+
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        val input2 = context.contentResolver.openInputStream(uri) ?: return null
+        var bitmap = BitmapFactory.decodeStream(input2, null, opts)
+        input2.close()
+
+        // Scale down to maxDim if still too big
+        if (bitmap != null && (bitmap.width > maxDim || bitmap.height > maxDim)) {
+            val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+            val nw = (bitmap.width * scale).toInt().coerceAtLeast(1)
+            val nh = (bitmap.height * scale).toInt().coerceAtLeast(1)
+            bitmap = Bitmap.createScaledBitmap(bitmap, nw, nh, true)
+        }
+
+        val out = ByteArrayOutputStream()
+        bitmap?.compress(Bitmap.CompressFormat.JPEG, 80, out)
+        val bytes = out.toByteArray()
+        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        "data:image/jpeg;base64,$b64"
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/** Decode a data URL (base64 image) back to a Bitmap for preview rendering. */
+private fun dataUrlToBitmap(dataUrl: String): Bitmap {
+    return try {
+        val comma = dataUrl.indexOf(',')
+        if (comma > 0) {
+            val b64 = dataUrl.substring(comma + 1)
+            val bytes = Base64.decode(b64, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        } else {
+            Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        }
+    } catch (_: Exception) {
+        Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     }
 }
