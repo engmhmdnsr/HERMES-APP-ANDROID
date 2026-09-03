@@ -35,11 +35,11 @@ class HermesPreferencesRepository(context: Context) {
 
     fun getConnectionConfig(): ConnectionConfig {
         return ConnectionConfig(
-            tailscaleIp = prefs.getString(KEY_IP, "100.84.12.93") ?: "100.84.12.93",
-            port = prefs.getInt(KEY_PORT, 8080),
+            tailscaleIp = prefs.getString(KEY_IP, "100.124.105.88") ?: "100.124.105.88",
+            port = prefs.getInt(KEY_PORT, 8642),
             remoteGatewayUrl = prefs.getString(KEY_GATEWAY_URL, "") ?: "",
             useCustomGatewayUrl = prefs.getBoolean(KEY_USE_CUSTOM_URL, false),
-            apiKey = prefs.getString(KEY_API_KEY, "hermes_live_key_99x") ?: "hermes_live_key_99x",
+            apiKey = prefs.getString(KEY_API_KEY, "") ?: "",
             useHttps = prefs.getBoolean(KEY_USE_HTTPS, false),
             isDemoMode = prefs.getBoolean(KEY_DEMO_MODE, false) // Default to Remote Gateway mode active
         )
@@ -66,7 +66,7 @@ class HermesPreferencesRepository(context: Context) {
     }
 
     fun getSelectedModelId(): String {
-        return prefs.getString(KEY_MODEL, "claude-3-7-sonnet") ?: "claude-3-7-sonnet"
+        return prefs.getString(KEY_MODEL, "deepseek/deepseek-v4-flash") ?: "deepseek/deepseek-v4-flash"
     }
 
     fun saveSelectedModelId(modelId: String) {

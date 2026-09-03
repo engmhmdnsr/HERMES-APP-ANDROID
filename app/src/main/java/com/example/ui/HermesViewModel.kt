@@ -98,9 +98,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         // Initialize with helpful welcome message from Hermes Agent
         seedInitialWelcomeMessage()
         startTelemetryPolling()
-        startAutoDiscovery()
         if (!_config.value.isDemoMode) {
-            testPing()
+            testPing() // this loads sessions + models on success
         }
     }
 
@@ -137,7 +136,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             if (trimmed.startsWith("hermes://connect")) {
                 val uri = android.net.Uri.parse(trimmed)
                 val ip = uri.getQueryParameter("ip") ?: uri.getQueryParameter("tailscale_ip") ?: "127.0.0.1"
-                val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 8080
+                val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 8642
                 val key = uri.getQueryParameter("key") ?: ""
                 val updated = _config.value.copy(
                     tailscaleIp = ip,
@@ -151,7 +150,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             } else if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
                 val json = org.json.JSONObject(trimmed)
                 val ip = json.optString("ip", json.optString("tailscale_ip", "127.0.0.1"))
-                val port = json.optInt("port", 8080)
+                val port = json.optInt("port", 8642)
                 val key = json.optString("key", json.optString("apiKey", ""))
                 val updated = _config.value.copy(
                     tailscaleIp = ip,
@@ -165,7 +164,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             } else if (trimmed.contains(":")) {
                 val parts = trimmed.split(":")
                 val ip = parts[0].trim()
-                val port = parts[1].toIntOrNull() ?: 8080
+                val port = parts[1].toIntOrNull() ?: 8642
                 val updated = _config.value.copy(
                     tailscaleIp = ip,
                     port = port,
@@ -205,39 +204,37 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private fun startTelemetryPolling() {
         telemetryPollingJob?.cancel()
         telemetryPollingJob = viewModelScope.launch {
+            var consecutiveFailures = 0
             while (isActive) {
                 if (_config.value.isDemoMode) {
                     _telemetry.update { current ->
                         HermesDemoSimulator.generateSimulatedTelemetry(current)
                     }
                     _connectionStatus.value = ConnectionStatus.DEMO_MODE
+                    consecutiveFailures = 0
                 } else {
-                    // Try real HTTP metrics fetch
                     val result = networkClient.fetchMetrics(_config.value)
                     if (result.isSuccess) {
                         result.getOrNull()?.let { newMetrics ->
-                            val currentHist = _telemetry.value.cpuHistory
-                            _telemetry.value = newMetrics.copy(
-                                cpuHistory = (currentHist + newMetrics.cpuUsage).takeLast(16)
-                            )
+                            _telemetry.value = newMetrics
                         }
                         _connectionStatus.value = ConnectionStatus.CONNECTED
+                        consecutiveFailures = 0
                     } else {
-                        _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                        consecutiveFailures++
+                        // 3 consecutive failures (~15s) = host unreachable
+                        if (consecutiveFailures >= 3) {
+                            _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                        }
                     }
                 }
-                delay(2000)
+                delay(5000)
             }
         }
     }
 
     fun setActiveTab(tab: AppTab) {
         _activeTab.value = tab
-    }
-
-    fun selectModel(model: AiModelInfo) {
-        _selectedModel.value = model
-        prefsRepo.saveSelectedModelId(model.id)
     }
 
     fun updateConnectionConfig(newConfig: ConnectionConfig) {
@@ -296,7 +293,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             result.onSuccess { list ->
                 _sessions.value = list
                 if (_currentSessionId.value == null && list.isNotEmpty()) {
-                    selectSession(list.first().id)
+                    // Prefer a session that actually has messages
+                    val withMsgs = list.firstOrNull { it.messageCount > 0 } ?: list.first()
+                    selectSession(withMsgs.id)
                 }
             }
             _isLoadingSessions.value = false
@@ -306,11 +305,40 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     fun selectSession(sessionId: String) {
         _currentSessionId.value = sessionId
         if (_config.value.isDemoMode) return
+        // Show session's model in the picker if known
+        val s = _sessions.value.find { it.id == sessionId }
+        if (s != null && s.model.isNotBlank() && s.model != "default") {
+            val known = _availableModels.value.find { it.id == s.model }
+            if (known != null) _selectedModel.value = known
+            else {
+                // Session model may not be in our live list yet; add it
+                val placeholder = AiModelInfo(
+                    id = s.model,
+                    displayName = s.model.substringAfterLast('/').replace("-", " ").replaceFirstChar { it.uppercase() },
+                    provider = s.model.substringBefore('/', "hermes"),
+                    description = s.model,
+                    isDefault = false
+                )
+                if (_availableModels.value.none { it.id == s.model }) {
+                    _availableModels.value = _availableModels.value + placeholder
+                }
+                _selectedModel.value = placeholder
+            }
+        }
         viewModelScope.launch {
             val result = networkClient.fetchSessionMessages(_config.value, sessionId)
             result.onSuccess { msgs ->
                 if (msgs.isNotEmpty()) {
                     _chatMessages.value = msgs
+                } else {
+                    _chatMessages.value = listOf(
+                        ChatMessage(
+                            id = "empty_$sessionId",
+                            sender = MessageSender.HERMES,
+                            content = "This session has no messages yet. Send a prompt to start.",
+                            isStreaming = false
+                        )
+                    )
                 }
             }
         }
@@ -327,13 +355,25 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             result.onSuccess { newSession ->
                 _sessions.update { listOf(newSession) + it }
                 _currentSessionId.value = newSession.id
+                // Lock the currently selected model on the new session
+                networkClient.lockSessionModel(_config.value, newSession.id, _selectedModel.value.id)
                 _chatMessages.value = listOf(
                     ChatMessage(
                         id = System.currentTimeMillis().toString(),
                         sender = MessageSender.HERMES,
-                        content = "Connected to new session: ${newSession.title}\nHost PC is ready for commands & chat."
+                        content = "Connected to new session: ${newSession.title}\nHost PC is ready for commands & chat.",
+                        isStreaming = false
                     )
                 )
+            }.onFailure { e ->
+                _chatMessages.update { list ->
+                    list + ChatMessage(
+                        id = "err_${System.currentTimeMillis()}",
+                        sender = MessageSender.HERMES,
+                        content = "⚠️ Failed to create session: ${e.message}",
+                        isStreaming = false
+                    )
+                }
             }
         }
     }
@@ -345,10 +385,35 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             result.onSuccess { models ->
                 if (models.isNotEmpty()) {
                     _availableModels.value = models
-                    if (models.none { it.id == _selectedModel.value.id }) {
+                    val savedId = prefsRepo.getSelectedModelId()
+                    val current = _selectedModel.value
+                    val found = models.find { it.id == savedId } ?: models.find { it.id == current.id }
+                    if (found != null) {
+                        _selectedModel.value = found
+                    } else {
                         _selectedModel.value = models.first()
                     }
                 }
+            }.onFailure { e ->
+                // Keep the placeholders if the server is unreachable
+                android.util.Log.w("HermesVM", "refreshModels failed: ${e.message}")
+            }
+        }
+    }
+
+    fun selectModel(model: AiModelInfo) {
+        _selectedModel.value = model
+        prefsRepo.saveSelectedModelId(model.id)
+        // Lock model on the current session so the API server routes this
+        // session to the chosen provider/model going forward.
+        val sid = _currentSessionId.value
+        if (sid != null && !_config.value.isDemoMode) {
+            viewModelScope.launch {
+                networkClient.lockSessionModel(_config.value, sid, model.id)
+                    .onSuccess { }
+                    .onFailure { e ->
+                        android.util.Log.w("HermesVM", "lockSessionModel failed: ${e.message}")
+                    }
             }
         }
     }
@@ -357,6 +422,35 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         val trimmed = prompt.trim()
         if (trimmed.isEmpty() || _isStreaming.value) return
 
+        // Ensure we have a session to talk to
+        if (!_config.value.isDemoMode && _currentSessionId.value == null) {
+            createNewSession()
+            // After creating, the actual message send happens below with the new session
+            // but the session id state may not be updated yet, so queue via state update.
+            viewModelScope.launch {
+                // Small delay to allow session creation to land, then send.
+                kotlinx.coroutines.delay(400)
+                if (_currentSessionId.value != null) {
+                    doSendMessage(trimmed)
+                } else {
+                    // surface error
+                    _chatMessages.update { list ->
+                        list + ChatMessage(
+                            id = "err_${System.currentTimeMillis()}",
+                            sender = MessageSender.HERMES,
+                            content = "⚠️ Could not create a session. Check the gateway connection.",
+                            isStreaming = false
+                        )
+                    }
+                }
+            }
+            return
+        }
+
+        doSendMessage(trimmed)
+    }
+
+    private fun doSendMessage(trimmed: String) {
         val userMessage = ChatMessage(
             id = "user_${System.currentTimeMillis()}",
             sender = MessageSender.USER,
@@ -429,7 +523,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                             list.map { msg ->
                                 if (msg.id == agentMessageId) {
                                     msg.copy(
-                                        content = msg.content + "\n⚠️ [خطأ بالاتصال]: ${chunk.message}",
+                                        content = msg.content + "\n⚠️ [Error]: ${chunk.message}",
                                         isStreaming = false
                                     )
                                 } else msg

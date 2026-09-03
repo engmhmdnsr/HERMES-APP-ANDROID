@@ -12,16 +12,16 @@ data class DiscoveredGateway(
     val hostname: String,
     val ip: String,
     val tailscaleIp: String? = null,
-    val port: Int = 8080,
+    val port: Int = 8642,
     val apiKey: String = ""
 )
 
 data class ConnectionConfig(
-    val tailscaleIp: String = "100.84.12.93",
-    val port: Int = 8080,
+    val tailscaleIp: String = "100.124.105.88",
+    val port: Int = 8642,
     val remoteGatewayUrl: String = "",
     val useCustomGatewayUrl: Boolean = false,
-    val apiKey: String = "hermes_live_key_99x",
+    val apiKey: String = "",
     val useHttps: Boolean = false,
     val isDemoMode: Boolean = false // Default to false so Remote Gateway mode is active!
 ) {
@@ -48,25 +48,20 @@ data class ConnectionConfig(
 }
 
 data class SystemTelemetry(
-    val cpuUsage: Float = 28.5f,
-    val ramUsedGb: Float = 14.8f,
-    val ramTotalGb: Float = 32.0f,
-    val gpuUsage: Float = 42.0f,
-    val vramUsedGb: Float = 8.2f,
-    val vramTotalGb: Float = 16.0f,
-    val hostname: String = "DESKTOP-HERMES-WIN11",
-    val osVersion: String = "Windows 11 Pro 23H2 (Build 22631)",
-    val uptime: String = "4d 18h 24m",
-    val agentVersion: String = "v2.4.1-edge",
-    val activeTasksCount: Int = 3,
-    val pingMs: Long = 28,
-    val cpuHistory: List<Float> = listOf(22f, 25f, 30f, 28f, 35f, 40f, 32f, 28.5f),
-    val activeProcesses: List<ProcessInfo> = listOf(
-        ProcessInfo("hermes-engine.exe", "PID 4120", "1.8 GB", "12.4% CPU"),
-        ProcessInfo("python3.11.exe", "PID 8904", "4.2 GB", "8.2% CPU"),
-        ProcessInfo("tailscale-ipn.exe", "PID 1024", "45 MB", "0.1% CPU"),
-        ProcessInfo("powershell.exe", "PID 12844", "120 MB", "2.1% CPU")
-    )
+    val cpuUsage: Float = 0f,
+    val ramUsedGb: Float = 0f,
+    val ramTotalGb: Float = 0f,
+    val gpuUsage: Float = 0f,
+    val vramUsedGb: Float = 0f,
+    val vramTotalGb: Float = 0f,
+    val hostname: String = "WINDOWS-11-PC",
+    val osVersion: String = "Windows 11",
+    val uptime: String = "",
+    val agentVersion: String = "",
+    val activeTasksCount: Int = 0,
+    val pingMs: Long = 0,
+    val cpuHistory: List<Float> = emptyList(),
+    val activeProcesses: List<ProcessInfo> = emptyList()
 )
 
 data class ProcessInfo(
@@ -84,7 +79,7 @@ enum class ToolStatus {
 
 data class ToolExecutionBlock(
     val id: String,
-    val toolName: String, // e.g. "powershell", "python", "bash", "fs_probe"
+    val toolName: String, // e.g. "terminal", "web_search"
     val command: String,
     val output: String = "",
     val status: ToolStatus = ToolStatus.RUNNING,
@@ -115,25 +110,14 @@ data class AiModelInfo(
     val isDefault: Boolean = false
 )
 
+// Placeholder list, replaced by live /api/model/options once connected.
 val AvailableAiModels = listOf(
     AiModelInfo(
-        id = "claude-3-7-sonnet",
-        displayName = "Claude 3.7 Sonnet",
-        provider = "Anthropic",
-        description = "Hybrid reasoning & deep code execution",
+        id = "deepseek/deepseek-v4-flash",
+        displayName = "DeepSeek V4 Flash",
+        provider = "CommandCode",
+        description = "Default fast agent model",
         isDefault = true
-    ),
-    AiModelInfo(
-        id = "deepseek-r1",
-        displayName = "DeepSeek R1",
-        provider = "Local/Ollama",
-        description = "Open reasoning model on Windows 11 RTX GPU"
-    ),
-    AiModelInfo(
-        id = "hermes-local-70b",
-        displayName = "Hermes 70B Local",
-        provider = "Nous Research",
-        description = "Agentic tool-use model running locally"
     )
 )
 
@@ -143,4 +127,11 @@ data class HermesSession(
     val model: String = "default",
     val startedAt: Long = 0L,
     val messageCount: Int = 0
+)
+
+// Provider grouping from /api/model/options (provider slug -> models)
+data class ModelProviderGroup(
+    val slug: String,
+    val name: String,
+    val models: List<String>
 )

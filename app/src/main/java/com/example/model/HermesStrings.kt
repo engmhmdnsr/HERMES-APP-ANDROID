@@ -372,24 +372,24 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.EN -> "Remote Gateway URL"
     }
     fun remoteGatewayUrlPlaceholder(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "https://hermes-pc.tailnet.ts.net أو http://100.84.12.93:8080"
-        AppLanguage.EN -> "https://hermes-pc.tailnet.ts.net or http://100.84.12.93:8080"
+        AppLanguage.AR -> "https://hermes-pc.tailnet.ts.net أو http://100.124.105.88:8642"
+        AppLanguage.EN -> "https://hermes-pc.tailnet.ts.net or http://100.124.105.88:8642"
     }
     fun gatewayPresetsTitle(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "نماذج البوابات السريعة (PRESETS)"
         AppLanguage.EN -> "QUICK GATEWAY PRESETS"
     }
     fun presetTailscaleDirect(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "عقدة Tailscale الافتراضية (100.84.12.93:8080)"
-        AppLanguage.EN -> "Tailscale Direct (100.84.12.93:8080)"
+        AppLanguage.AR -> "عقدة Tailscale الافتراضية (100.124.105.88:8642)"
+        AppLanguage.EN -> "Tailscale Direct (100.124.105.88:8642)"
     }
     fun presetTailscaleFunnel(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "نفق Tailscale المشفر (https://hermes.ts.net)"
         AppLanguage.EN -> "Tailscale Funnel HTTPS (https://hermes.ts.net)"
     }
     fun presetLocalhost(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "محاكي أندرويد المحلي (10.0.2.2:8080)"
-        AppLanguage.EN -> "Android Host Loopback (10.0.2.2:8080)"
+        AppLanguage.AR -> "محاكي أندرويد المحلي (10.0.2.2:8642)"
+        AppLanguage.EN -> "Android Host Loopback (10.0.2.2:8642)"
     }
     fun remoteGatewayRoutingBanner(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "مسار خاصية Remote Gateway:"
@@ -422,8 +422,8 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.EN -> "2. Via LM Studio on Windows (No Key Needed):\nStart Local Server in LM Studio, set port to 1234. No API key required."
     }
     fun apiKeySourceCustomServer(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "3. سيرفر Hermes المخصص (Python / FastAPI):\nالمفتاح هو الرقم السري الذي كتبته أنت بنفسك في ملف الإعدادات .env على جهازك (مثال: hermes_live_key_99x)."
-        AppLanguage.EN -> "3. Custom Hermes Server (Python / FastAPI):\nThe API key is the secret password you configured yourself in the .env file on your PC (e.g. hermes_live_key_99x)."
+        AppLanguage.AR -> "3. Hermes API Server الرسمي على الـ PC:" + "\n" + "المفتاح هو API_SERVER_KEY من ملف .env على جهازك (AppData/Local/hermes/.env)."
+        AppLanguage.EN -> "3. Official Hermes API Server on your PC:" + "\n" + "The key is API_SERVER_KEY from the .env file on your PC (AppData/Local/hermes/.env)."
     }
     fun apiKeySourceOpenRouter(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "4. عبر الإنترنت (OpenRouter Cloud API):\nإذا كنت تريد تشغيل نموذج Hermes 3 سحابياً بدون جهازك، أنشئ حساباً مجانياً على openrouter.ai واحصل على مفتاح يبدأ بـ sk-or-v1-..."

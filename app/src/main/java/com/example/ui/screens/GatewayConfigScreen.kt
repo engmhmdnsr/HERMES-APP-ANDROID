@@ -807,7 +807,7 @@ fun GatewayConfigScreen(
                             value = portInput,
                             onValueChange = { portInput = it },
                             label = { Text(HermesStrings.portLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
-                            placeholder = { Text("8080", style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                            placeholder = { Text("8642", style = MonospaceStyle.copy(fontSize = 11.sp)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
                             textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
@@ -863,7 +863,7 @@ fun GatewayConfigScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Preset 1: 100.84.12.93:8080
+                    // Preset 1: 100.124.105.88:8642 (this PC, official API)
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -872,15 +872,15 @@ fun GatewayConfigScreen(
                             .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(6.dp))
                             .clickable {
                                 useCustomGatewayUrl = false
-                                ipInput = "100.84.12.93"
-                                portInput = "8080"
+                                ipInput = "100.124.105.88"
+                                portInput = "8642"
                                 useHttps = false
                             }
                             .padding(vertical = 6.dp, horizontal = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "100.84.12.93",
+                            text = "100.124.105.88",
                             style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonCyan)
                         )
                     }
@@ -915,7 +915,7 @@ fun GatewayConfigScreen(
                             .clickable {
                                 useCustomGatewayUrl = false
                                 ipInput = "10.0.2.2"
-                                portInput = "8080"
+                                portInput = "8642"
                                 useHttps = false
                             }
                             .padding(vertical = 6.dp, horizontal = 8.dp),
@@ -1198,7 +1198,7 @@ fun GatewayConfigScreen(
                     Button(
                         onClick = {
                             // First save current values to config so test ping tests current target
-                            val parsedPort = portInput.toIntOrNull() ?: 8080
+                            val parsedPort = portInput.toIntOrNull() ?: 8642
                             onSaveConfig(
                                 config.copy(
                                     tailscaleIp = ipInput.trim(),
@@ -1236,7 +1236,7 @@ fun GatewayConfigScreen(
                     // Save Config Button
                     Button(
                         onClick = {
-                            val parsedPort = portInput.toIntOrNull() ?: 8080
+                            val parsedPort = portInput.toIntOrNull() ?: 8642
                             onSaveConfig(
                                 config.copy(
                                     tailscaleIp = ipInput.trim(),
@@ -1374,7 +1374,7 @@ fun GatewayConfigScreen(
                         .padding(10.dp)
                 ) {
                     Text(
-                        text = "netsh advfirewall firewall add rule name=\"HermesAgent\" dir=in action=allow protocol=TCP localport=8080 remoteip=100.64.0.0/10",
+                        text = "netsh advfirewall firewall add rule name=\"HermesAgent\" dir=in action=allow protocol=TCP localport=8642 remoteip=100.64.0.0/10",
                         style = MonospaceStyle.copy(
                             fontSize = 10.sp,
                             color = TextTerminal,
