@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
@@ -88,6 +89,12 @@ import ee.oversight.hermes.model.ConnectionConfig
 import ee.oversight.hermes.model.HermesSession
 import ee.oversight.hermes.model.HermesStrings
 import ee.oversight.hermes.model.MessageSender
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import androidx.compose.runtime.rememberCoroutineScope
 import ee.oversight.hermes.ui.components.MonospaceToolBlock
 import ee.oversight.hermes.ui.theme.CyberBg
 import ee.oversight.hermes.ui.theme.CyberSurface
@@ -131,7 +138,13 @@ fun ChatTerminalScreen(
     val listState = rememberLazyListState()
     // Image attachments picked for the next message (data URLs)
     var pendingImages by remember { mutableStateOf<List<String>>(emptyList()) }
+    // Uploaded file paths (absolute paths on the PC) + display names
+    var pendingFiles by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    // Show attach options sheet
+    var showAttachSheet by remember { mutableStateOf(false) }
+    var isUploading by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Image picker launcher (opens system photo picker)
     val imagePicker = rememberLauncherForActivityResult(
@@ -142,6 +155,25 @@ fun ChatTerminalScreen(
                     uriToCompressedDataUrl(context, uri)
                 }
                 pendingImages = pendingImages + newImages
+            }
+        }
+    )
+
+    // File picker launcher (opens system file picker for any type)
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = { uri ->
+            if (uri != null) {
+                val fileName = queryDisplayName(context, uri) ?: "file"
+                // Upload immediately to the PC via /api/files
+                scope.launch {
+                    isUploading = true
+                    val uploaded = uploadFileToGateway(config, context, uri, fileName)
+                    isUploading = false
+                    if (uploaded != null) {
+                        pendingFiles = pendingFiles + uploaded
+                    }
+                }
             }
         }
     )
@@ -370,6 +402,60 @@ fun ChatTerminalScreen(
             }
         )
 
+        // Uploading indicator
+        if (isUploading) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(strokeWidth = 2.dp, color = NeonCyan, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (language == AppLanguage.AR) "جاري رفع الملف..." else "Uploading file...",
+                    style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                )
+            }
+        }
+
+        // Pending files (uploaded, ready to send)
+        if (pendingFiles.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                pendingFiles.forEach { (path, name) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CyberSurfaceElevated)
+                            .border(1.dp, NeonViolet.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.InsertDriveFile, null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = name,
+                            style = MonospaceStyle.copy(fontSize = 11.sp, color = TextPrimary),
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { pendingFiles = pendingFiles.filter { it.first != path } },
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Remove", tint = TextSecondary, modifier = Modifier.size(12.dp))
+                        }
+                    }
+                }
+            }
+        }
+
         // Image attachment previews (picked but not yet sent)
         if (pendingImages.isNotEmpty()) {
             Row(
@@ -410,18 +496,121 @@ fun ChatTerminalScreen(
             language = language,
             onTextChange = { promptInput = it },
             isStreaming = isStreaming,
-            hasAttachments = pendingImages.isNotEmpty(),
-            onAttachClick = { imagePicker.launch("image/*") },
+            hasAttachments = pendingImages.isNotEmpty() || pendingFiles.isNotEmpty() || isUploading,
+            onAttachClick = { showAttachSheet = true },
             onSend = {
-                if (promptInput.isNotBlank() || pendingImages.isNotEmpty()) {
-                    onSendMessage(promptInput, pendingImages)
+                if (promptInput.isNotBlank() || pendingImages.isNotEmpty() || pendingFiles.isNotEmpty()) {
+                    // Build the message text: prompt + uploaded file paths
+                    var finalPrompt = promptInput
+                    if (pendingFiles.isNotEmpty()) {
+                        val fileNote = pendingFiles.joinToString("\n") { (path, name) ->
+                            "[File: $name] Saved at: $path"
+                        }
+                        finalPrompt = if (finalPrompt.isNotBlank()) {
+                            "$finalPrompt\n\n$fileNote"
+                        } else {
+                            fileNote
+                        }
+                    }
+                    onSendMessage(finalPrompt, pendingImages)
                     promptInput = ""
                     pendingImages = emptyList()
+                    pendingFiles = emptyList()
                 }
             },
             onStop = onStopStreaming,
             modifier = Modifier.imePadding()
         )
+
+        // Attach options bottom sheet (photo or file)
+        if (showAttachSheet) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showAttachSheet = false },
+                containerColor = CyberSurface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 30.dp)
+                ) {
+                    Text(
+                        text = if (language == AppLanguage.AR) "إرفاق" else "Attach",
+                        style = MonospaceStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    // Photo option
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(CyberSurfaceElevated)
+                            .clickable {
+                                showAttachSheet = false
+                                imagePicker.launch("image/*")
+                            }
+                            .padding(horizontal = 14.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(NeonCyan.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Image, null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = if (language == AppLanguage.AR) "صورة" else "Photo",
+                                style = MonospaceStyle.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            )
+                            Text(
+                                text = if (language == AppLanguage.AR) "اختر صورة من المعرض" else "Pick an image from gallery",
+                                style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // File option
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(CyberSurfaceElevated)
+                            .clickable {
+                                showAttachSheet = false
+                                filePicker.launch("*/*")
+                            }
+                            .padding(horizontal = 14.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(NeonViolet.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.InsertDriveFile, null, tint = NeonVioletLight, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = if (language == AppLanguage.AR) "ملف" else "File",
+                                style = MonospaceStyle.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            )
+                            Text(
+                                text = if (language == AppLanguage.AR) "PDF, DOCX, ZIP وأي نوع ملفات" else "PDF, DOCX, ZIP and any file",
+                                style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1146,5 +1335,74 @@ private fun dataUrlToBitmap(dataUrl: String): Bitmap {
         }
     } catch (_: Exception) {
         Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+    }
+}
+
+// ============ File attachment helpers ============
+
+/** Get a content Uri's display name (filename) from the ContentResolver. */
+private fun queryDisplayName(context: Context, uri: Uri): String? {
+    return try {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+        }
+    } catch (_: Exception) {
+        uri.lastPathSegment
+    }
+}
+
+/**
+ * Upload a picked file to the PC gateway (/api/files) as base64 JSON.
+ * Returns (absolutePathOnPC, displayName) on success, null on failure.
+ */
+private suspend fun uploadFileToGateway(
+    config: ConnectionConfig,
+    context: Context,
+    uri: Uri,
+    displayName: String
+): Pair<String, String>? {
+    return withContext(Dispatchers.IO) {
+        try {
+            val input = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            val bytes = input.readBytes()
+            input.close()
+
+            // Cap ~9MB raw so base64 stays under the 10MB server limit
+            if (bytes.size > 9 * 1024 * 1024) return@withContext null
+
+            val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            val payload = org.json.JSONObject().apply {
+                put("filename", displayName)
+                put("content_b64", b64)
+            }
+
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+
+            val body = payload.toString().toRequestBody("application/json".toMediaType())
+            val reqBuilder = okhttp3.Request.Builder()
+                .url("${config.baseUrl}/api/files")
+                .post(body)
+            if (config.apiKey.isNotBlank()) {
+                reqBuilder.addHeader("Authorization", "Bearer ${config.apiKey}")
+            }
+
+            client.newCall(reqBuilder.build()).execute().use { response ->
+                if (response.isSuccessful) {
+                    val json = org.json.JSONObject(response.body?.string() ?: "{}")
+                    val path = json.optString("path", "")
+                    if (path.isNotBlank()) {
+                        return@withContext Pair(path, displayName)
+                    }
+                }
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 }
