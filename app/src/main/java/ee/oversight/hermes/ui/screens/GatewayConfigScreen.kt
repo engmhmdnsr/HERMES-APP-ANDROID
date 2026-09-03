@@ -23,12 +23,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -492,36 +496,129 @@ fun GatewayConfigScreen(
 
         // ===== About us =====
         SectionCard {
-            Text(
-                text = "ABOUT US",
-                style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonViolet)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            HorizontalDivider(color = CyberSurfaceBorder, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = if (language == AppLanguage.AR) "تم التصميم والتطوير بواسطة" else "Designed & developed by",
-                style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary)
-            )
-            Text(
-                text = "Mohamed Nasr",
-                style = MonospaceStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary),
-                modifier = Modifier.padding(top = 2.dp)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
+            // Header with icon
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Lock, null, tint = TextSecondary, modifier = Modifier.size(12.dp))
+                Icon(Icons.Default.Info, null, tint = NeonViolet, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "mhmdnsr@oversight.ee",
-                    style = MonospaceStyle.copy(fontSize = 12.sp, color = NeonCyan)
+                    text = "ABOUT US",
+                    style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonViolet)
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "oversight.ee",
-                style = MonospaceStyle.copy(fontSize = 12.sp, color = NeonCyan)
-            )
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = CyberSurfaceBorder, thickness = 1.dp)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Developer card (centered)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(CyberSurfaceElevated)
+                    .border(1.dp, NeonViolet.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                    .padding(vertical = 14.dp, horizontal = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Avatar circle with initials
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(NeonViolet.copy(alpha = 0.2f))
+                        .border(1.dp, NeonViolet.copy(alpha = 0.6f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "MN",
+                        style = MonospaceStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = NeonVioletLight)
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = if (language == AppLanguage.AR) "تم التصميم والتطوير بواسطة" else "Designed & developed by",
+                    style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Mohamed Nasr",
+                    style = MonospaceStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Contact links (clickable)
+            val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+            // Email row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(CyberSurfaceElevated)
+                    .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(10.dp))
+                    .clickable { uriHandler.openUri("mailto:mhmdnsr@oversight.ee") }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NeonCyan.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Email, null, tint = NeonCyan, modifier = Modifier.size(14.dp))
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Email",
+                        style = MonospaceStyle.copy(fontSize = 9.sp, color = TextSecondary)
+                    )
+                    Text(
+                        text = "mhmdnsr@oversight.ee",
+                        style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = NeonCyan)
+                    )
+                }
+                Icon(Icons.Default.ChevronRight, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Website row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(CyberSurfaceElevated)
+                    .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(10.dp))
+                    .clickable { uriHandler.openUri("https://oversight.ee") }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NeonCyan.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Public, null, tint = NeonCyan, modifier = Modifier.size(14.dp))
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Website",
+                        style = MonospaceStyle.copy(fontSize = 9.sp, color = TextSecondary)
+                    )
+                    Text(
+                        text = "oversight.ee",
+                        style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = NeonCyan)
+                    )
+                }
+                Icon(Icons.Default.ChevronRight, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
