@@ -57,10 +57,6 @@ object HermesStrings {
         AppLanguage.AR -> "بث لحظي"
         AppLanguage.EN -> "STREAMING"
     }
-    fun receivingStream(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "جاري استقبال تدفق النصوص من SSE..."
-        AppLanguage.EN -> "Receiving SSE text stream..."
-    }
     fun inputPlaceholder(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "اكتب أمراً أو استفساراً (مثل: فحص المعالج، تشغيل سكريبت)..."
         AppLanguage.EN -> "Type prompt or system command (e.g. check cpu, run script)..."
@@ -87,10 +83,6 @@ object HermesStrings {
         AppLanguage.AR -> "🔒 تدقيق اتصال نفق Tailscale وجدار الحماية"
         AppLanguage.EN -> "🔒 Audit Tailscale tunnel and firewall rules"
     }
-    fun presetDeepSeek(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "🧠 استنتاج واستكشاف أخطاء بنموذج DeepSeek R1"
-        AppLanguage.EN -> "🧠 Reasoning & troubleshooting with DeepSeek R1"
-    }
 
     // Initial greeting in chat
     fun welcomeMessage(lang: AppLanguage) = when (lang) {
@@ -109,30 +101,6 @@ You can send instructions, execute system commands, and monitor CPU and memory i
     }
 
     // Tool blocks
-    fun toolTerminal(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "الطرفية"
-        AppLanguage.EN -> "TERMINAL"
-    }
-    fun toolRunning(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "قيد التنفيذ"
-        AppLanguage.EN -> "RUNNING"
-    }
-    fun toolFailed(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "فشل"
-        AppLanguage.EN -> "FAILED"
-    }
-    fun toolSuccess(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "نجاح"
-        AppLanguage.EN -> "SUCCESS"
-    }
-    fun toolCopied(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تم نسخ الأمر إلى الحافظة"
-        AppLanguage.EN -> "Command copied to clipboard"
-    }
-    fun toolExecuting(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "جاري التنفيذ على مضيف Windows 11..."
-        AppLanguage.EN -> "Executing on Windows 11 host..."
-    }
 
     // Telemetry Screen
     fun metricsTitle(lang: AppLanguage) = when (lang) {
@@ -167,21 +135,9 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.AR -> "${String.format("%.1f", freeGb)} جيجابايت متاح"
         AppLanguage.EN -> "${String.format("%.1f", freeGb)} GB Free"
     }
-    fun cpuTimeline(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "المخطط الزمني لاستهلاك المعالج"
-        AppLanguage.EN -> "CPU UTILIZATION TIMELINE"
-    }
-    fun liveBadge(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "لحظي"
-        AppLanguage.EN -> "LIVE"
-    }
     fun hostSpecsTitle(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "بيانات مضيف WINDOWS 11"
         AppLanguage.EN -> "WINDOWS 11 HOST TELEMETRY"
-    }
-    fun statusOnline(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "الحالة: متصل"
-        AppLanguage.EN -> "STATUS: ONLINE"
     }
     fun hostnameLabel(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "اسم الجهاز:"
@@ -194,10 +150,6 @@ You can send instructions, execute system commands, and monitor CPU and memory i
     fun tailscaleNodeLabel(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "عقدة Tailscale:"
         AppLanguage.EN -> "Tailscale Node:"
-    }
-    fun directPeer(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "(نظير مباشر P2P)"
-        AppLanguage.EN -> "(Direct Peer)"
     }
     fun uptimeLabel(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "مدة التشغيل:"
@@ -299,33 +251,9 @@ You can send instructions, execute system commands, and monitor CPU and memory i
     }
 
     // Remote Gateway Feature
-    fun remoteGateway(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "خاصية Remote Gateway"
-        AppLanguage.EN -> "REMOTE GATEWAY"
-    }
-    fun remoteGatewayModeTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "خاصية بوابة التحكم عن بعد (Remote Gateway)"
-        AppLanguage.EN -> "REMOTE GATEWAY FEATURE"
-    }
-    fun remoteGatewayModeDesc(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "توجيه كافة أوامر الاستنتاج والتحكم البرمجي وبث SSE وقراءات الموارد عبر خادم البوابة البعيد على Windows 11."
-        AppLanguage.EN -> "Route all agent commands, LLM inference, SSE text stream, and system telemetry through your remote Windows 11 gateway."
-    }
-    fun remoteGatewayToggle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تشغيل بخاصية Remote Gateway"
-        AppLanguage.EN -> "Run in Remote Gateway Mode"
-    }
     fun gatewayTypeLabel(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "طريقة استهداف البوابة:"
         AppLanguage.EN -> "Gateway Addressing Method:"
-    }
-    fun gatewayTypeTailscaleIp(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "عنوان Tailscale IP والمنفذ"
-        AppLanguage.EN -> "Tailscale IP & Port"
-    }
-    fun gatewayTypeCustomUrl(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "رابط URL مخصص (Tunnel / MagicDNS)"
-        AppLanguage.EN -> "Custom URL (Tunnel / MagicDNS)"
     }
     fun remoteGatewayUrlLabel(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "رابط البوابة البعيدة (Gateway URL)"
@@ -335,126 +263,16 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.AR -> "https://hermes-pc.tailnet.ts.net أو http://100.x.x.x:8080"
         AppLanguage.EN -> "https://hermes-pc.tailnet.ts.net or http://100.x.x.x:8080"
     }
-    fun gatewayPresetsTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "نماذج البوابات السريعة (PRESETS)"
-        AppLanguage.EN -> "QUICK GATEWAY PRESETS"
-    }
     fun presetTailscaleDirect(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "أدخل IP الـ Tailscale بتاع جهازك (من تطبيق Tailscale)"
         AppLanguage.EN -> "Enter your PC's Tailscale IP (from the Tailscale app)"
     }
-    fun presetTailscaleFunnel(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "نفق Tailscale المشفر (https://hermes.ts.net)"
-        AppLanguage.EN -> "Tailscale Funnel HTTPS (https://hermes.ts.net)"
-    }
-    fun presetLocalhost(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "محاكي أندرويد المحلي (10.0.2.2:8080)"
-        AppLanguage.EN -> "Android Host Loopback (10.0.2.2:8080)"
-    }
-    fun remoteGatewayRoutingBanner(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "مسار خاصية Remote Gateway:"
-        AppLanguage.EN -> "Remote Gateway Route:"
-    }
-    fun gatewayDiagnosticsTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تشخيصات اتصال البوابة"
-        AppLanguage.EN -> "GATEWAY DIAGNOSTICS"
-    }
-    fun gatewayDiagnosticsInfo(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "عند تفعيل خاصية Remote Gateway، يتم إرسال طلبات الذكاء الاصطناعي وبث النصوص SSE واستعلامات المعالج والذاكرة مباشرة إلى كمبيوتر Windows 11."
-        AppLanguage.EN -> "With Remote Gateway enabled, all AI inference requests, SSE text streams, and system telemetry are routed directly to the remote Windows 11 PC."
-    }
 
     // Hermes API Key Guidance
-    fun whereToGetApiKeyTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "كيف أحصل على Hermes API Key؟"
-        AppLanguage.EN -> "Where do I get the Hermes API Key?"
-    }
-    fun apiKeyGuideInfo(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "مفتاح Hermes API ليس اشتراكاً تشتريه من موقع، بل يعتمد على الطريقة التي تشغل بها النموذج:"
-        AppLanguage.EN -> "Hermes API is not a closed service you buy from a website, it depends on how you run the model:"
-    }
-    fun apiKeySourceCustomServer(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "3. Hermes API Server الرسمي على الـ PC:" + "\n" + "المفتاح هو API_SERVER_KEY من ملف .env على جهازك (AppData/Local/hermes/.env)."
-        AppLanguage.EN -> "3. Official Hermes API Server on your PC:" + "\n" + "The key is API_SERVER_KEY from the .env file on your PC (AppData/Local/hermes/.env)."
-    }
 
     // Guide
-    fun guideTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "دليل ربط TAILSCALE وجدار الحماية"
-        AppLanguage.EN -> "TAILSCALE & FIREWALL GUIDE"
-    }
-    fun guideContent(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> """
-1. **لا حاجة لفتح منافذ في الراوتر (Zero Port Forwarding):**
-يقوم Tailscale بإنشاء نفق WireGuard مشفر بين هاتفك وجهاز Windows 11 مباشرة وبأعلى معايير الأمان.
-
-2. **عنوان IP الخاص بالجهاز:**
-افتح تطبيق Tailscale على Windows 11 وانسخ عنوان IP الجهاز (يبدأ دائماً بـ 100.x.x.x) ثم ضعه في الحقل أعلاه.
-
-3. **أمر جدار الحماية في Windows 11 PowerShell:**
-لتقييد الوصول وحصره فقط على أجهزة شبكة Tailscale الآمنة، نفذ الأمر التالي في PowerShell بصلاحيات المسؤول (Run as Administrator):
-        """.trimIndent()
-        AppLanguage.EN -> """
-1. **Zero Port Forwarding Required:**
-Tailscale creates an encrypted WireGuard peer-to-peer tunnel directly between your mobile device and your Windows 11 PC.
-
-2. **Tailscale Node IP:**
-Open the Tailscale app on Windows 11 to copy your node's IP address (always begins with 100.x.x.x) and paste it into the field above.
-
-3. **Windows 11 PowerShell Firewall Rule:**
-To restrict gateway access strictly to authorized Tailscale peer traffic, run in an elevated PowerShell:
-        """.trimIndent()
-    }
 
     // Full Hermes Agent Server Script on Windows
-    fun copyServerScriptButton(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "نسخ كود السيرفر (hermes_server.py)"
-        AppLanguage.EN -> "Copy Server Script (hermes_server.py)"
-    }
-    fun scriptCopiedSuccess(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تم نسخ كود السيرفر إلى الحافظة!"
-        AppLanguage.EN -> "Server script copied to clipboard!"
-    }
-    fun runServerInstructions(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> """
-خطوات التفعيل على Windows:
-1. افتح ملف الإعدادات على جهازك:
-   %LOCALAPPDATA%\hermes\.env
-
-2. ضيف في آخره:
-   API_SERVER_ENABLED=true
-   API_SERVER_KEY=<مفتاح طويل عشوائي>
-   API_SERVER_HOST=<IP بتاع Tailscale>
-   API_SERVER_PORT=8080
-
-3. ولّد مفتاح قوي بالأمر:
-   python -c "import secrets; print(secrets.token_hex(32))"
-
-4. أعد تشغيل البوابة:
-   hermes gateway restart
-
-5. التطبيق هيشتغل على: IP:8080 بالمفتاح اللي كتبته
-        """.trimIndent()
-        AppLanguage.EN -> """
-Setup steps on your Windows PC:
-1. Open the config file on your PC:
-   %LOCALAPPDATA%\hermes\.env
-
-2. Append at the end:
-   API_SERVER_ENABLED=true
-   API_SERVER_KEY=<long-random-secret>
-   API_SERVER_HOST=<your-tailscale-ip>
-   API_SERVER_PORT=8080
-
-3. Generate a strong key:
-   python -c "import secrets; print(secrets.token_hex(32))"
-
-4. Restart the gateway:
-   hermes gateway restart
-
-5. Point the app at IP:8080 with the key you set.
-        """.trimIndent()
-    }
 
     // Auto-Discovery & QR Strings
     fun autoDiscoverTitle(lang: AppLanguage) = when (lang) {
@@ -466,8 +284,8 @@ Setup steps on your Windows PC:
         AppLanguage.EN -> "Scanning local Wi-Fi network for Hermes Agent..."
     }
     fun autoDiscoverNotFound(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "لم يتم العثور على جهاز بعد. تأكد من تشغيل run_server.bat على الكمبيوتر"
-        AppLanguage.EN -> "No PC found yet. Ensure run_server.bat is running on your PC."
+        AppLanguage.AR -> "لم يتم العثور على جهاز بعد. تأكد إن الـ PC على نفس شبكة الواي فاي والـ beacon شغال"
+        AppLanguage.EN -> "No PC found yet. Make sure the PC is on the same Wi-Fi and the discovery beacon is running."
     }
     fun autoDiscoverFoundTitle(lang: AppLanguage, host: String) = when (lang) {
         AppLanguage.AR -> "تم العثور على كمبيوترك: $host"
@@ -480,5 +298,59 @@ Setup steps on your Windows PC:
     fun autoDiscoverBtnRescan(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "إعادة البحث"
         AppLanguage.EN -> "Rescan"
+    }
+
+    // Tool execution blocks
+    fun toolTerminal(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "الطرفية"
+        AppLanguage.EN -> "TERMINAL"
+    }
+    fun toolRunning(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "قيد التنفيذ"
+        AppLanguage.EN -> "RUNNING"
+    }
+    fun toolFailed(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "فشل"
+        AppLanguage.EN -> "FAILED"
+    }
+    fun toolSuccess(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "نجاح"
+        AppLanguage.EN -> "SUCCESS"
+    }
+    fun toolCopied(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "تم نسخ الأمر إلى الحافظة"
+        AppLanguage.EN -> "Command copied to clipboard"
+    }
+    fun toolExecuting(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "جاري التنفيذ على مضيف Windows 11..."
+        AppLanguage.EN -> "Executing on Windows 11 host..."
+    }
+
+    // Telemetry extras
+    fun statusOnline(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "الحالة: متصل"
+        AppLanguage.EN -> "STATUS: ONLINE"
+    }
+    fun directPeer(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "(نظير مباشر P2P)"
+        AppLanguage.EN -> "(Direct Peer)"
+    }
+    fun cpuTimeline(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "المخطط الزمني لاستهلاك المعالج"
+        AppLanguage.EN -> "CPU UTILIZATION TIMELINE"
+    }
+    fun liveBadge(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "لحظي"
+        AppLanguage.EN -> "LIVE"
+    }
+
+    // Chat stream extras
+    fun receivingStream(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "جاري استقبال تدفق النصوص من SSE..."
+        AppLanguage.EN -> "Receiving SSE text stream..."
+    }
+    fun presetDeepSeek(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "🧠 استنتاج واستكشاف أخطاء بنموذج DeepSeek R1"
+        AppLanguage.EN -> "🧠 Reasoning & troubleshooting with DeepSeek R1"
     }
 }
