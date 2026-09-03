@@ -44,7 +44,7 @@ sealed class StreamChunk {
 /**
  * Client for the OFFICIAL Hermes API server (gateway/platforms/api_server.py).
  *
- * Base URL should be http://<tailscale-ip>:8642 (no trailing slash).
+ * Base URL should be http://<tailscale-ip>:8080 (no trailing slash).
  * Auth: Authorization: Bearer <API_SERVER_KEY>.
  *
  * Endpoints:
@@ -112,7 +112,7 @@ class HermesNetworkClient {
                             hostname = json.optString("hostname", "WIN11-HERMES"),
                             ip = senderIp,
                             tailscaleIp = tsIp,
-                            port = json.optInt("port", 8642),
+                            port = json.optInt("port", 8080),
                             apiKey = json.optString("apiKey", json.optString("api_key", ""))
                         )
                     }

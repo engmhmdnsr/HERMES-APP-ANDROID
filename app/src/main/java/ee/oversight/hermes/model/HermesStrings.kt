@@ -372,8 +372,8 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.EN -> "Remote Gateway URL"
     }
     fun remoteGatewayUrlPlaceholder(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "https://hermes-pc.tailnet.ts.net أو http://100.x.x.x:8642"
-        AppLanguage.EN -> "https://hermes-pc.tailnet.ts.net or http://100.x.x.x:8642"
+        AppLanguage.AR -> "https://hermes-pc.tailnet.ts.net أو http://100.x.x.x:8080"
+        AppLanguage.EN -> "https://hermes-pc.tailnet.ts.net or http://100.x.x.x:8080"
     }
     fun gatewayPresetsTitle(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "نماذج البوابات السريعة (PRESETS)"
@@ -388,8 +388,8 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.EN -> "Tailscale Funnel HTTPS (https://hermes.ts.net)"
     }
     fun presetLocalhost(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "محاكي أندرويد المحلي (10.0.2.2:8642)"
-        AppLanguage.EN -> "Android Host Loopback (10.0.2.2:8642)"
+        AppLanguage.AR -> "محاكي أندرويد المحلي (10.0.2.2:8080)"
+        AppLanguage.EN -> "Android Host Loopback (10.0.2.2:8080)"
     }
     fun remoteGatewayRoutingBanner(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "مسار خاصية Remote Gateway:"
@@ -493,7 +493,7 @@ To restrict gateway access strictly to authorized Tailscale peer traffic, run in
    API_SERVER_ENABLED=true
    API_SERVER_KEY=<مفتاح طويل عشوائي>
    API_SERVER_HOST=<IP بتاع Tailscale>
-   API_SERVER_PORT=8642
+   API_SERVER_PORT=8080
 
 3. ولّد مفتاح قوي بالأمر:
    python -c "import secrets; print(secrets.token_hex(32))"
@@ -501,7 +501,7 @@ To restrict gateway access strictly to authorized Tailscale peer traffic, run in
 4. أعد تشغيل البوابة:
    hermes gateway restart
 
-5. التطبيق هيشتغل على: IP:8642 بالمفتاح اللي كتبته
+5. التطبيق هيشتغل على: IP:8080 بالمفتاح اللي كتبته
         """.trimIndent()
         AppLanguage.EN -> """
 Setup steps on your Windows PC:
@@ -512,7 +512,7 @@ Setup steps on your Windows PC:
    API_SERVER_ENABLED=true
    API_SERVER_KEY=<long-random-secret>
    API_SERVER_HOST=<your-tailscale-ip>
-   API_SERVER_PORT=8642
+   API_SERVER_PORT=8080
 
 3. Generate a strong key:
    python -c "import secrets; print(secrets.token_hex(32))"
@@ -520,7 +520,7 @@ Setup steps on your Windows PC:
 4. Restart the gateway:
    hermes gateway restart
 
-5. Point the app at IP:8642 with the key you set.
+5. Point the app at IP:8080 with the key you set.
         """.trimIndent()
     }
 

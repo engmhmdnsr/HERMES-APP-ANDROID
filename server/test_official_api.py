@@ -42,7 +42,7 @@ def req(base, path, key, method="GET", body=None, timeout=30, stream=False):
 def main():
     key = load_env_key()
     host = os.environ.get("API_SERVER_HOST", "100.124.105.88")
-    port = os.environ.get("API_SERVER_PORT", "8642")
+    port = os.environ.get("API_SERVER_PORT", "8080")
     base = f"http://{host}:{port}"
     if not key:
         print("FATAL: no API_SERVER_KEY found")

@@ -24,7 +24,7 @@ object HermesServerScript {
 #    API_SERVER_ENABLED=true
 #    API_SERVER_KEY=<generate-a-long-random-secret>
 #    API_SERVER_HOST=100.x.x.x        <- your Tailscale IP
-#    API_SERVER_PORT=8642
+#    API_SERVER_PORT=8080
 #
 #    Generate a strong key with:
 #      python -c "import secrets; print(secrets.token_hex(32))"
@@ -33,12 +33,12 @@ object HermesServerScript {
 #    hermes gateway restart
 #
 # 4) Verify from the same PC:
-#    curl -H "Authorization: Bearer <key>" http://127.0.0.1:8642/health
+#    curl -H "Authorization: Bearer <key>" http://127.0.0.1:8080/health
 #    -> {"status":"ok","platform":"hermes-agent",...}
 #
 # 5) In the app on your phone, set:
 #    IP      : your PC Tailscale IP (100.x.x.x)
-#    Port    : 8642
+#    Port    : 8080
 #    API Key : the API_SERVER_KEY value
 #
 # The API server is bound to your Tailscale IP only, never 0.0.0.0,
