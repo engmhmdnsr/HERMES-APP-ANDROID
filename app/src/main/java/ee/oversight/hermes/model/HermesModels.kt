@@ -4,7 +4,6 @@ enum class ConnectionStatus {
     DISCONNECTED,
     CONNECTING,
     CONNECTED,
-    DEMO_MODE,
     ERROR
 }
 
@@ -12,22 +11,18 @@ data class DiscoveredGateway(
     val hostname: String,
     val ip: String,
     val tailscaleIp: String? = null,
-    val port: Int = 8642,
+    val port: Int = 8080,
     val apiKey: String = ""
 )
 
 data class ConnectionConfig(
-    val tailscaleIp: String = "100.100.100.100", // placeholder: user must enter their PC's Tailscale IP
-    val port: Int = 8642,
+    val tailscaleIp: String = "", // user must enter their PC's Tailscale IP
+    val port: Int = 8080,
     val remoteGatewayUrl: String = "",
     val useCustomGatewayUrl: Boolean = false,
     val apiKey: String = "",
-    val useHttps: Boolean = false,
-    val isDemoMode: Boolean = false // Default to false so Remote Gateway mode is active!
+    val useHttps: Boolean = false
 ) {
-    val isRemoteGatewayActive: Boolean
-        get() = !isDemoMode
-
     val effectiveGatewayUrl: String
         get() {
             if (useCustomGatewayUrl && remoteGatewayUrl.isNotBlank()) {

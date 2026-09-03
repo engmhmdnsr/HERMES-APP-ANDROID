@@ -13,7 +13,7 @@ This app talks to the **official Hermes API server** built into Hermes Agent (th
 ```
 ┌─────────────┐   HTTPS/Tailscale    ┌─────────────────────────────┐
 │ Android App │ ───────────────────► │ Hermes Gateway (Windows PC) │
-│ (Kotlin)    │   http://100.x.x.x:8642  │  platforms.api_server    │
+│ (Kotlin)    │   http://100.x.x.x:8080  │  platforms.api_server    │
 └─────────────┘                     │  • /api/sessions           │
                                    │  • /api/sessions/{id}/chat  │
                                    │  • /api/model/options       │
@@ -36,7 +36,7 @@ Edit `%LOCALAPPDATA%\hermes\.env` (on the Windows PC) and add:
 API_SERVER_ENABLED=true
 API_SERVER_KEY=<long-random-secret>
 API_SERVER_HOST=<your-tailscale-ip>    # e.g. 100.124.105.88
-API_SERVER_PORT=8642
+API_SERVER_PORT=8080
 ```
 
 Generate a strong key:
@@ -54,7 +54,7 @@ hermes gateway restart
 ### 3. Verify it is listening
 
 ```bash
-curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8642/health
+curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8080/health
 # → {"status":"ok","platform":"hermes-agent","version":"0.20.x"}
 ```
 
@@ -66,7 +66,7 @@ curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8642/health
 
 1. Install the APK (`HermesControl-debug.apk` or `app/build/outputs/apk/debug/app-debug.apk`).
 2. Open **Gateway** tab.
-3. Enter your PC's **Tailscale IP** (e.g. `100.124.105.88`), **port** `8642`, and the **API_SERVER_KEY** from `.env`.
+3. Enter your PC's **Tailscale IP** (e.g. `100.124.105.88`), **port** `8080`, and the **API_SERVER_KEY** from `.env`.
 4. Tap **TEST PING** - you should see `PEER HANDSHAKE SUCCESSFUL`.
 5. The app auto-loads your sessions and the live model list.
 
@@ -75,7 +75,7 @@ curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8642/health
 The official API server does not serve a QR page. You can build your own pairing QR by encoding:
 
 ```
-hermes://connect?ip=100.124.105.88&port=8642&key=<API_SERVER_KEY>
+hermes://connect?ip=100.124.105.88&port=8080&key=<API_SERVER_KEY>
 ```
 
 The app accepts that deep link / QR text on the Gateway tab.
@@ -86,8 +86,9 @@ The app accepts that deep link / QR text on the Gateway tab.
 
 | Purpose | Method & Path | Notes |
 |---|---|---|
-| Health check | `GET /health` | Auth: `Authorization: Bearer <key>` |
+| Health check | `GET /health` | Auth: `Authorization: Bearer *** |
 | Gateway status | `GET /health/detailed` | platforms state, version, readiness |
+| System telemetry | `GET /api/system` | CPU/RAM/GPU + processes (psutil, added to api_server) |
 | List sessions | `GET /api/sessions?limit=50` | `{object:"list", data:[...]}` |
 | Session messages | `GET /api/sessions/{id}/messages?order=oldest` | `{data:[{role,content,...}]}` |
 | Create session | `POST /api/sessions` | body `{title?, model?, source}` |
@@ -130,7 +131,7 @@ python server/test_official_api.py
 
 > The old custom gateway (port 8080, FastAPI shim) is **not needed anymore** -
 > do NOT run it. It wrote directly into Hermes' state.db and exposed an
-> unauthenticated surface on `0.0.0.0`. The official API server (8642)
+> unauthenticated surface on `0.0.0.0`. The official API server (8080)
 > replaces it.
 
 ---
@@ -139,11 +140,24 @@ python server/test_official_api.py
 
 | Symptom | Fix |
 |---|---|
-| `Connection refused` / ping fails | Gateway not running on PC → `hermes gateway restart`; verify `netstat -ano \| grep 8642` |
+| `Connection refused` / ping fails | Gateway not running on PC → `hermes gateway restart`; verify `netstat -ano \| grep 8080` |
 | HTTP 401 | Wrong API key → copy `API_SERVER_KEY` exactly from `.env` |
 | Sessions list empty | API server can't read state.db → check gateway log: `%LOCALAPPDATA%\hermes\logs\gateway.log` |
-| Old app pointed to 8080 | The legacy custom gateway is deprecated. Use port **8642** and the official API |
+| Can't connect | Verify gateway running (`hermes gateway restart`), port **8080**, correct API key |
 | Model list empty | Run `hermes model` once on the PC to populate the provider catalog |
+
+## Auto-discovery (same Wi-Fi)
+
+To let the app auto-find this PC on the same Wi-Fi (no typing), run the UDP
+beacon alongside the gateway:
+
+```bash
+python server/hermes_discovery_beacon.py
+```
+
+A `Hermes_Discovery_Beacon.vbs` in the Windows Startup folder launches it at
+logon automatically. It advertises the API port (default 8080) over UDP 8089;
+the app's "Auto-discover" then finds the PC instantly.
 
 ---
 
@@ -153,7 +167,7 @@ python server/test_official_api.py
 app/src/main/java/com/example/
   data/HermesNetworkClient.kt     # Official API client (sessions, stream, models)
   data/HermesPreferencesRepository.kt
-  model/HermesModels.kt           # Data classes + defaults (Tailscale IP, port 8642)
+  model/HermesModels.kt           # Data classes + defaults (Tailscale IP, port 8080)
   model/HermesServerScript.kt     # PC setup guide (official API server)
   ui/HermesViewModel.kt           # State + orchestration
   ui/screens/                     # ChatTerminal / SystemMonitoring / GatewayConfig

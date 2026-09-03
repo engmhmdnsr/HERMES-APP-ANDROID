@@ -87,7 +87,7 @@ fun SystemMonitoringScreen(
                         )
                     )
                     Text(
-                        text = if (config.isDemoMode) HermesStrings.metricsSubtitleDemo(language) else HermesStrings.metricsSubtitleLive(language),
+                        text = HermesStrings.metricsSubtitleLive(language),
                         style = MonospaceStyle.copy(
                             fontSize = 11.sp,
                             color = TextSecondary

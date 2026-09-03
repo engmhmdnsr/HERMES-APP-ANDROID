@@ -3,7 +3,6 @@ package ee.oversight.hermes.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import ee.oversight.hermes.data.HermesDemoSimulator
 import ee.oversight.hermes.data.HermesNetworkClient
 import ee.oversight.hermes.data.HermesPreferencesRepository
 import ee.oversight.hermes.data.PingResult
@@ -42,9 +41,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _config = MutableStateFlow(prefsRepo.getConnectionConfig())
     val config: StateFlow<ConnectionConfig> = _config.asStateFlow()
 
-    private val _connectionStatus = MutableStateFlow(
-        if (_config.value.isDemoMode) ConnectionStatus.DEMO_MODE else ConnectionStatus.DISCONNECTED
-    )
+    private val _connectionStatus = MutableStateFlow(ConnectionStatus.DISCONNECTED)
     val connectionStatus: StateFlow<ConnectionStatus> = _connectionStatus.asStateFlow()
 
     private val _telemetry = MutableStateFlow(SystemTelemetry())
@@ -93,13 +90,15 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     private var telemetryPollingJob: Job? = null
     private var streamingJob: Job? = null
+    private var pendingSend: String? = null
 
     init {
-        // Initialize with helpful welcome message from Hermes Agent
-        seedInitialWelcomeMessage()
+        // Start with empty chat (no fake welcome) until a session loads.
+        _chatMessages.value = emptyList()
         startTelemetryPolling()
-        if (!_config.value.isDemoMode) {
-            testPing() // this loads sessions + models on success
+        // If the user already has a saved config, try connecting automatically.
+        if (_config.value.tailscaleIp.isNotBlank()) {
+            testPing()
         }
     }
 
@@ -124,7 +123,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             tailscaleIp = targetIp,
             port = discovered.port,
             apiKey = discovered.apiKey.ifEmpty { _config.value.apiKey },
-            isDemoMode = false,
             useCustomGatewayUrl = false
         )
         updateConnectionConfig(updated)
@@ -136,13 +134,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             if (trimmed.startsWith("hermes://connect")) {
                 val uri = android.net.Uri.parse(trimmed)
                 val ip = uri.getQueryParameter("ip") ?: uri.getQueryParameter("tailscale_ip") ?: "127.0.0.1"
-                val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 8642
+                val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 8080
                 val key = uri.getQueryParameter("key") ?: ""
                 val updated = _config.value.copy(
                     tailscaleIp = ip,
                     port = port,
                     apiKey = key.ifEmpty { _config.value.apiKey },
-                    isDemoMode = false,
                     useCustomGatewayUrl = false
                 )
                 updateConnectionConfig(updated)
@@ -150,13 +147,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             } else if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
                 val json = org.json.JSONObject(trimmed)
                 val ip = json.optString("ip", json.optString("tailscale_ip", "127.0.0.1"))
-                val port = json.optInt("port", 8642)
+                val port = json.optInt("port", 8080)
                 val key = json.optString("key", json.optString("apiKey", ""))
                 val updated = _config.value.copy(
                     tailscaleIp = ip,
                     port = port,
                     apiKey = key.ifEmpty { _config.value.apiKey },
-                    isDemoMode = false,
                     useCustomGatewayUrl = false
                 )
                 updateConnectionConfig(updated)
@@ -164,11 +160,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             } else if (trimmed.contains(":")) {
                 val parts = trimmed.split(":")
                 val ip = parts[0].trim()
-                val port = parts[1].toIntOrNull() ?: 8642
+                val port = parts[1].toIntOrNull() ?: 8080
                 val updated = _config.value.copy(
                     tailscaleIp = ip,
                     port = port,
-                    isDemoMode = false,
                     useCustomGatewayUrl = false
                 )
                 updateConnectionConfig(updated)
@@ -183,22 +178,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     fun setAppLanguage(language: AppLanguage) {
         _appLanguage.value = language
         prefsRepo.saveAppLanguage(language)
-        // If current chat is only the welcome message, refresh it with new language
-        if (_chatMessages.value.size <= 1) {
-            seedInitialWelcomeMessage()
-        }
-    }
-
-    private fun seedInitialWelcomeMessage() {
-        val welcome = ChatMessage(
-            id = "welcome_msg",
-            sender = MessageSender.HERMES,
-            timestamp = System.currentTimeMillis(),
-            modelName = _selectedModel.value.displayName,
-            content = HermesStrings.welcomeMessage(_appLanguage.value),
-            isStreaming = false
-        )
-        _chatMessages.value = listOf(welcome)
     }
 
     private fun startTelemetryPolling() {
@@ -206,26 +185,23 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         telemetryPollingJob = viewModelScope.launch {
             var consecutiveFailures = 0
             while (isActive) {
-                if (_config.value.isDemoMode) {
-                    _telemetry.update { current ->
-                        HermesDemoSimulator.generateSimulatedTelemetry(current)
+                // Only poll when we have a target configured
+                if (_config.value.tailscaleIp.isBlank()) {
+                    delay(3000)
+                    continue
+                }
+                val result = networkClient.fetchMetrics(_config.value)
+                if (result.isSuccess) {
+                    result.getOrNull()?.let { newMetrics ->
+                        _telemetry.value = newMetrics
                     }
-                    _connectionStatus.value = ConnectionStatus.DEMO_MODE
+                    _connectionStatus.value = ConnectionStatus.CONNECTED
                     consecutiveFailures = 0
                 } else {
-                    val result = networkClient.fetchMetrics(_config.value)
-                    if (result.isSuccess) {
-                        result.getOrNull()?.let { newMetrics ->
-                            _telemetry.value = newMetrics
-                        }
-                        _connectionStatus.value = ConnectionStatus.CONNECTED
-                        consecutiveFailures = 0
-                    } else {
-                        consecutiveFailures++
-                        // 3 consecutive failures (~15s) = host unreachable
-                        if (consecutiveFailures >= 3) {
-                            _connectionStatus.value = ConnectionStatus.DISCONNECTED
-                        }
+                    consecutiveFailures++
+                    // 3 consecutive failures (~15s) = host unreachable
+                    if (consecutiveFailures >= 3) {
+                        _connectionStatus.value = ConnectionStatus.DISCONNECTED
                     }
                 }
                 delay(5000)
@@ -240,53 +216,35 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     fun updateConnectionConfig(newConfig: ConnectionConfig) {
         _config.value = newConfig
         prefsRepo.saveConnectionConfig(newConfig)
-        if (newConfig.isDemoMode) {
-            _connectionStatus.value = ConnectionStatus.DEMO_MODE
-        } else {
-            testPing()
-        }
-        startTelemetryPolling()
-    }
-
-    fun toggleDemoMode(enabled: Boolean) {
-        val updated = _config.value.copy(isDemoMode = enabled)
-        _config.value = updated
-        prefsRepo.saveConnectionConfig(updated)
-        _connectionStatus.value = if (enabled) ConnectionStatus.DEMO_MODE else ConnectionStatus.CONNECTING
-        if (enabled) {
-            _pingResult.value = HermesDemoSimulator.simulatePing(updated.tailscaleIp, updated.port)
-        } else {
-            testPing()
-        }
+        testPing()
         startTelemetryPolling()
     }
 
     fun testPing() {
         viewModelScope.launch {
             _isPinging.value = true
+            _connectionStatus.value = ConnectionStatus.CONNECTING
             val currentConfig = _config.value
-            val result = if (currentConfig.isDemoMode) {
-                delay(400)
-                HermesDemoSimulator.simulatePing(currentConfig.tailscaleIp, currentConfig.port)
-            } else {
-                _connectionStatus.value = ConnectionStatus.CONNECTING
-                val res = networkClient.ping(currentConfig)
-                if (res.isSuccess) {
-                    _connectionStatus.value = ConnectionStatus.CONNECTED
-                    loadSessions()
-                    refreshModels()
-                } else {
-                    _connectionStatus.value = ConnectionStatus.ERROR
-                }
-                res
+            if (currentConfig.tailscaleIp.isBlank()) {
+                _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                _isPinging.value = false
+                return@launch
             }
-            _pingResult.value = result
+            val res = networkClient.ping(currentConfig)
+            if (res.isSuccess) {
+                _connectionStatus.value = ConnectionStatus.CONNECTED
+                loadSessions()
+                refreshModels()
+            } else {
+                _connectionStatus.value = ConnectionStatus.ERROR
+            }
+            _pingResult.value = res
             _isPinging.value = false
         }
     }
 
     fun loadSessions() {
-        if (_config.value.isDemoMode) return
+        if (_config.value.tailscaleIp.isBlank()) return
         viewModelScope.launch {
             _isLoadingSessions.value = true
             val result = networkClient.fetchSessions(_config.value)
@@ -304,7 +262,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectSession(sessionId: String) {
         _currentSessionId.value = sessionId
-        if (_config.value.isDemoMode) return
         // Show session's model in the picker if known
         val s = _sessions.value.find { it.id == sessionId }
         if (s != null && s.model.isNotBlank() && s.model != "default") {
@@ -344,13 +301,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun createNewSession(title: String? = null) {
+    fun createNewSession(title: String? = null, thenSend: String? = null) {
         viewModelScope.launch {
-            if (_config.value.isDemoMode) {
-                _chatMessages.value = emptyList()
-                seedInitialWelcomeMessage()
-                return@launch
-            }
             val result = networkClient.createNewSession(_config.value, title, _selectedModel.value.id)
             result.onSuccess { newSession ->
                 _sessions.update { listOf(newSession) + it }
@@ -365,6 +317,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                         isStreaming = false
                     )
                 )
+                // If a message was queued behind session creation, send it now.
+                val queued = thenSend ?: pendingSend
+                pendingSend = null
+                if (queued != null) {
+                    doSendMessage(queued)
+                }
             }.onFailure { e ->
                 _chatMessages.update { list ->
                     list + ChatMessage(
@@ -379,7 +337,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun refreshModels() {
-        if (_config.value.isDemoMode) return
+        if (_config.value.tailscaleIp.isBlank()) return
         viewModelScope.launch {
             val result = networkClient.fetchModels(_config.value)
             result.onSuccess { models ->
@@ -395,7 +353,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }.onFailure { e ->
-                // Keep the placeholders if the server is unreachable
                 android.util.Log.w("HermesVM", "refreshModels failed: ${e.message}")
             }
         }
@@ -407,7 +364,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         // Lock model on the current session so the API server routes this
         // session to the chosen provider/model going forward.
         val sid = _currentSessionId.value
-        if (sid != null && !_config.value.isDemoMode) {
+        if (sid != null) {
             viewModelScope.launch {
                 networkClient.lockSessionModel(_config.value, sid, model.id)
                     .onSuccess { }
@@ -422,28 +379,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         val trimmed = prompt.trim()
         if (trimmed.isEmpty() || _isStreaming.value) return
 
-        // Ensure we have a session to talk to
-        if (!_config.value.isDemoMode && _currentSessionId.value == null) {
+        // If no session yet, create one and queue the message to send after.
+        if (_currentSessionId.value == null) {
+            pendingSend = trimmed
             createNewSession()
-            // After creating, the actual message send happens below with the new session
-            // but the session id state may not be updated yet, so queue via state update.
-            viewModelScope.launch {
-                // Small delay to allow session creation to land, then send.
-                kotlinx.coroutines.delay(400)
-                if (_currentSessionId.value != null) {
-                    doSendMessage(trimmed)
-                } else {
-                    // surface error
-                    _chatMessages.update { list ->
-                        list + ChatMessage(
-                            id = "err_${System.currentTimeMillis()}",
-                            sender = MessageSender.HERMES,
-                            content = "⚠️ Could not create a session. Check the gateway connection.",
-                            isStreaming = false
-                        )
-                    }
-                }
-            }
             return
         }
 
@@ -474,15 +413,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
         streamingJob?.cancel()
         streamingJob = viewModelScope.launch {
-            val streamFlow = if (_config.value.isDemoMode) {
-                HermesDemoSimulator.simulateChatStream(
-                    prompt = trimmed,
-                    modelName = _selectedModel.value.displayName,
-                    lang = _appLanguage.value
-                )
-            } else {
-                networkClient.streamChat(_config.value, trimmed, _selectedModel.value.id, _currentSessionId.value)
-            }
+            val streamFlow = networkClient.streamChat(
+                _config.value,
+                trimmed,
+                _selectedModel.value.id,
+                _currentSessionId.value
+            )
 
             streamFlow.collect { chunk ->
                 when (chunk) {
@@ -553,9 +489,5 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 if (msg.isStreaming) msg.copy(isStreaming = false) else msg
             }
         }
-    }
-
-    fun clearChat() {
-        seedInitialWelcomeMessage()
     }
 }

@@ -116,11 +116,28 @@ fun ChatTerminalScreen(
     var promptInput by remember { mutableStateOf("") }
     var showSessionsSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // Remember which session we already auto-scrolled to bottom for.
+    // This prevents re-scrolling to the top every time the tab is reopened.
+    var lastScrolledSession by remember { mutableStateOf<String?>(null) }
 
-    // Auto-scroll to bottom when new messages arrive or stream updates
-    LaunchedEffect(messages.size, messages.lastOrNull()?.content?.length, messages.lastOrNull()?.toolExecutions?.size) {
+    // Scroll to bottom when:
+    //  1. A new session is selected (first load)
+    //  2. New messages arrive while streaming (isStreaming or size grows)
+    // NOT on every recomposition / tab re-entry for an already-seen session.
+    val lastMsgLen = messages.lastOrNull()?.content?.length ?: 0
+    LaunchedEffect(currentSessionId, messages.size, lastMsgLen, messages.lastOrNull()?.toolExecutions?.size) {
+        val sid = currentSessionId
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            val isNewSession = sid != null && lastScrolledSession != sid
+            val isStreamingUpdate = isStreaming || (sid != null && lastScrolledSession == sid && messages.size > 1)
+            if (isNewSession) {
+                // First open of this session: jump to bottom instantly
+                listState.scrollToItem(messages.size - 1)
+                lastScrolledSession = sid
+            } else if (isStreamingUpdate) {
+                // Streaming new content: follow along
+                listState.animateScrollToItem(messages.size - 1)
+            }
         }
     }
 
@@ -296,57 +313,6 @@ fun ChatTerminalScreen(
                     }
                     Spacer(modifier = Modifier.height(20.dp))
                 }
-            }
-        }
-
-        // Remote Gateway Active Route Status Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (config.isRemoteGatewayActive) NeonCyan.copy(alpha = 0.08f) else NeonViolet.copy(alpha = 0.08f))
-                .border(
-                    1.dp,
-                    if (config.isRemoteGatewayActive) NeonCyan.copy(alpha = 0.3f) else NeonViolet.copy(alpha = 0.3f),
-                    RoundedCornerShape(6.dp)
-                )
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(if (config.isRemoteGatewayActive) NeonCyan else NeonVioletLight)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (config.isRemoteGatewayActive) {
-                        if (language == AppLanguage.AR) "بوابة عن بعد نشطة:" else "REMOTE GATEWAY:"
-                    } else {
-                        if (language == AppLanguage.AR) "محاكاة محلية:" else "SIMULATOR:"
-                    },
-                    style = MonospaceStyle.copy(
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (config.isRemoteGatewayActive) NeonCyan else NeonVioletLight
-                    )
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (config.isRemoteGatewayActive) {
-                        config.effectiveGatewayUrl
-                    } else {
-                        "simulated-engine://offline"
-                    },
-                    style = MonospaceStyle.copy(
-                        fontSize = 10.sp,
-                        color = TextSecondary
-                    )
-                )
             }
         }
 

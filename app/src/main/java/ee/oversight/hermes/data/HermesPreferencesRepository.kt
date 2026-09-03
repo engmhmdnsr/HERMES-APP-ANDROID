@@ -2,6 +2,7 @@ package ee.oversight.hermes.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import ee.oversight.hermes.model.AppLanguage
 import ee.oversight.hermes.model.ConnectionConfig
 
 class HermesPreferencesRepository(context: Context) {
@@ -13,35 +14,33 @@ class HermesPreferencesRepository(context: Context) {
         private const val KEY_PORT = "pref_port"
         private const val KEY_API_KEY = "pref_api_key"
         private const val KEY_USE_HTTPS = "pref_use_https"
-        private const val KEY_DEMO_MODE = "pref_demo_mode"
         private const val KEY_GATEWAY_URL = "pref_gateway_url"
         private const val KEY_USE_CUSTOM_URL = "pref_use_custom_url"
         private const val KEY_MODEL = "pref_selected_model"
         private const val KEY_LANGUAGE = "pref_app_language"
     }
 
-    fun getAppLanguage(): ee.oversight.hermes.model.AppLanguage {
-        val code = prefs.getString(KEY_LANGUAGE, ee.oversight.hermes.model.AppLanguage.EN.code)
-        return if (code == ee.oversight.hermes.model.AppLanguage.AR.code) {
-            ee.oversight.hermes.model.AppLanguage.AR
+    fun getAppLanguage(): AppLanguage {
+        val code = prefs.getString(KEY_LANGUAGE, AppLanguage.EN.code)
+        return if (code == AppLanguage.AR.code) {
+            AppLanguage.AR
         } else {
-            ee.oversight.hermes.model.AppLanguage.EN
+            AppLanguage.EN
         }
     }
 
-    fun saveAppLanguage(language: ee.oversight.hermes.model.AppLanguage) {
+    fun saveAppLanguage(language: AppLanguage) {
         prefs.edit().putString(KEY_LANGUAGE, language.code).apply()
     }
 
     fun getConnectionConfig(): ConnectionConfig {
         return ConnectionConfig(
-            tailscaleIp = prefs.getString(KEY_IP, "100.100.100.100") ?: "100.100.100.100",
-            port = prefs.getInt(KEY_PORT, 8642),
+            tailscaleIp = prefs.getString(KEY_IP, "") ?: "",
+            port = prefs.getInt(KEY_PORT, 8080),
             remoteGatewayUrl = prefs.getString(KEY_GATEWAY_URL, "") ?: "",
             useCustomGatewayUrl = prefs.getBoolean(KEY_USE_CUSTOM_URL, false),
             apiKey = prefs.getString(KEY_API_KEY, "") ?: "",
-            useHttps = prefs.getBoolean(KEY_USE_HTTPS, false),
-            isDemoMode = prefs.getBoolean(KEY_DEMO_MODE, false) // Default to Remote Gateway mode active
+            useHttps = prefs.getBoolean(KEY_USE_HTTPS, false)
         )
     }
 
@@ -53,16 +52,7 @@ class HermesPreferencesRepository(context: Context) {
             .putBoolean(KEY_USE_CUSTOM_URL, config.useCustomGatewayUrl)
             .putString(KEY_API_KEY, config.apiKey)
             .putBoolean(KEY_USE_HTTPS, config.useHttps)
-            .putBoolean(KEY_DEMO_MODE, config.isDemoMode)
             .apply()
-    }
-
-    fun setDemoMode(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_DEMO_MODE, enabled).apply()
-    }
-
-    fun setRemoteGatewayActive(active: Boolean) {
-        prefs.edit().putBoolean(KEY_DEMO_MODE, !active).apply()
     }
 
     fun getSelectedModelId(): String {

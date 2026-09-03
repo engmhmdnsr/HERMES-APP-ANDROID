@@ -188,13 +188,12 @@ class HermesNetworkClient {
     }
 
     // ------------------------------------------------------------------
-    // Gateway health & status. The official API server's /health/detailed
-    // exposes gateway readiness/state (NOT host CPU/RAM), which is what a
-    // mobile "system monitor" tab can honestly show.
+    // System telemetry: GET /api/system (added to the official API server)
+    // Returns real host CPU/RAM/GPU via psutil + nvidia-smi.
     // ------------------------------------------------------------------
     suspend fun fetchMetrics(config: ConnectionConfig): Result<SystemTelemetry> = withContext(Dispatchers.IO) {
         try {
-            val url = "${config.baseUrl}/health/detailed"
+            val url = "${config.baseUrl}/api/system"
             val request = Request.Builder().url(url).authHeaders(config).get().build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
@@ -202,36 +201,48 @@ class HermesNetworkClient {
                 }
                 val bodyStr = response.body?.string() ?: "{}"
                 val json = JSONObject(bodyStr)
-                val readiness = json.optJSONObject("readiness") ?: JSONObject()
-                val checks = readiness.optJSONObject("checks") ?: JSONObject()
-                val gw = checks.optJSONObject("gateway") ?: JSONObject()
-                val disk = checks.optJSONObject("disk") ?: JSONObject()
-                val platforms = json.optJSONObject("platforms") ?: JSONObject()
 
-                // Build process-like summary from connected platforms
+                // Parse processes list
                 val procs = mutableListOf<ProcessInfo>()
-                val platNames = listOf("telegram", "discord", "api_server", "mattermost", "matrix", "slack")
-                for (pn in platNames) {
-                    val p = platforms.optJSONObject(pn)
-                    if (p != null) {
-                        val state = p.optString("state", "unknown")
-                        procs.add(ProcessInfo(name = pn.uppercase(), pid = "", memory = "", cpu = state))
+                val procArr = json.optJSONArray("processes")
+                if (procArr != null) {
+                    for (i in 0 until procArr.length()) {
+                        val p = procArr.optJSONObject(i)
+                        if (p != null) {
+                            procs.add(
+                                ProcessInfo(
+                                    name = p.optString("name", ""),
+                                    pid = p.optString("pid", ""),
+                                    memory = p.optString("memory", ""),
+                                    cpu = p.optString("cpu", "")
+                                )
+                            )
+                        }
+                    }
+                }
+
+                val cpuHist = mutableListOf<Float>()
+                val histArr = json.optJSONArray("cpu_history")
+                if (histArr != null) {
+                    for (i in 0 until histArr.length()) {
+                        cpuHist.add(histArr.optDouble(i, 0.0).toFloat())
                     }
                 }
 
                 val telemetry = SystemTelemetry(
-                    cpuUsage = 0f, // not exposed by official API
-                    ramUsedGb = 0f,
-                    ramTotalGb = 0f,
-                    gpuUsage = 0f,
-                    vramUsedGb = 0f,
-                    vramTotalGb = 0f,
-                    hostname = json.optString("platform", "hermes-agent"),
-                    osVersion = "Windows 11",
-                    uptime = json.optString("gateway_state", ""),
-                    agentVersion = "Hermes ${json.optString("version", "")}",
-                    activeTasksCount = json.optInt("active_agents", 0),
-                    pingMs = 0,
+                    cpuUsage = json.optDouble("cpu_usage", 0.0).toFloat(),
+                    ramUsedGb = json.optDouble("ram_used_gb", 0.0).toFloat(),
+                    ramTotalGb = json.optDouble("ram_total_gb", 0.0).toFloat(),
+                    gpuUsage = json.optDouble("gpu_usage", 0.0).toFloat(),
+                    vramUsedGb = json.optDouble("vram_used_gb", 0.0).toFloat(),
+                    vramTotalGb = json.optDouble("vram_total_gb", 0.0).toFloat(),
+                    hostname = json.optString("hostname", "WINDOWS-PC"),
+                    osVersion = json.optString("os_version", "Windows"),
+                    uptime = json.optString("uptime", ""),
+                    agentVersion = json.optString("agent_version", ""),
+                    activeTasksCount = json.optInt("active_tasks_count", 0),
+                    pingMs = json.optLong("ping_ms", 0L),
+                    cpuHistory = cpuHist,
                     activeProcesses = procs
                 )
                 Result.success(telemetry)
