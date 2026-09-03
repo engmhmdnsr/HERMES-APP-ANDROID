@@ -41,12 +41,21 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -56,8 +65,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import android.widget.Toast
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,12 +100,15 @@ import java.io.ByteArrayOutputStream
 import ee.oversight.hermes.data.HermesAppLog
 import ee.oversight.hermes.model.AiModelInfo
 import ee.oversight.hermes.model.AppLanguage
+import ee.oversight.hermes.model.ApprovalMode
+import ee.oversight.hermes.model.ApprovalRequest
 import ee.oversight.hermes.model.AvailableAiModels
 import ee.oversight.hermes.model.ChatMessage
 import ee.oversight.hermes.model.ConnectionConfig
 import ee.oversight.hermes.model.HermesSession
 import ee.oversight.hermes.model.HermesStrings
 import ee.oversight.hermes.model.MessageSender
+import ee.oversight.hermes.ui.components.InteractiveApprovalCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -132,10 +151,12 @@ fun ChatTerminalScreen(
     onRefreshSessions: () -> Unit,
     onSendMessage: (String, List<String>) -> Unit,
     onStopStreaming: () -> Unit,
+    activeApprovalRequest: ApprovalRequest? = null,
+    onResolveApproval: ((ApprovalRequest, Boolean, ApprovalMode) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var promptInput by remember { mutableStateOf("") }
-    var showSessionsSheet by remember { mutableStateOf(false) }
+    var showAllModelsSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // Image attachments picked for the next message (data URLs)
     var pendingImages by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -145,7 +166,21 @@ fun ChatTerminalScreen(
     var showAttachSheet by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    // Speech-to-Text Dictation launcher
+    val speechLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                promptInput = if (promptInput.isBlank()) spokenText else "$promptInput $spokenText"
+            }
+        }
+    }
 
     // Image picker launcher (opens system photo picker)
     val imagePicker = rememberLauncherForActivityResult(
@@ -169,7 +204,7 @@ fun ChatTerminalScreen(
                 // Upload immediately to the PC via /api/files
                 scope.launch {
                     isUploading = true
-                    val uploaded = uploadFileToGateway(config, context, uri, fileName)
+                    val uploaded = uploadFileToGateway(config, context, uri, fileName, language)
                     isUploading = false
                     if (uploaded != null) {
                         HermesAppLog.info("File uploaded: $fileName -> ${uploaded.first}")
@@ -182,25 +217,19 @@ fun ChatTerminalScreen(
         }
     )
     // Remember which session we already auto-scrolled to bottom for.
-    // This prevents re-scrolling to the top every time the tab is reopened.
     var lastScrolledSession by remember { mutableStateOf<String?>(null) }
 
-    // Scroll to bottom when:
-    //  1. A new session is selected (first load)
-    //  2. New messages arrive while streaming (isStreaming or size grows)
-    // NOT on every recomposition / tab re-entry for an already-seen session.
     val lastMsgLen = messages.lastOrNull()?.content?.length ?: 0
     LaunchedEffect(currentSessionId, messages.size, lastMsgLen, messages.lastOrNull()?.toolExecutions?.size) {
         val sid = currentSessionId
         if (messages.isNotEmpty()) {
             val isNewSession = sid != null && lastScrolledSession != sid
-            val isStreamingUpdate = isStreaming || (sid != null && lastScrolledSession == sid && messages.size > 1)
+            val isAtBottom = !listState.canScrollForward ||
+                (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= messages.size - 2
             if (isNewSession) {
-                // First open of this session: jump to bottom instantly
                 listState.scrollToItem(messages.size - 1)
                 lastScrolledSession = sid
-            } else if (isStreamingUpdate) {
-                // Streaming new content: follow along
+            } else if (isAtBottom && (isStreaming || messages.size > 1)) {
                 listState.animateScrollToItem(messages.size - 1)
             }
         }
@@ -211,187 +240,52 @@ fun ChatTerminalScreen(
             .fillMaxSize()
             .background(CyberBg)
     ) {
-        // Model Selector Bar
-        ModelSelectorRow(
-            selectedModel = selectedModel,
-            availableModels = availableModels,
-            language = language,
-            onSelectModel = onSelectModel
-        )
-
-        // Sessions Selector Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            val activeSession = sessions.find { it.id == currentSessionId }
-            val activeTitle = activeSession?.title ?: (if (language == AppLanguage.AR) "الجلسات (${sessions.size})" else "Sessions (${sessions.size})")
-
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(CyberSurfaceElevated)
-                    .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                    .clickable { showSessionsSheet = true }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Folder,
-                    contentDescription = null,
-                    tint = NeonCyan,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = activeTitle,
-                    style = MonospaceStyle.copy(
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    ),
-                    maxLines = 1
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // New Session Button
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(NeonViolet.copy(alpha = 0.2f))
-                    .border(1.dp, NeonViolet, RoundedCornerShape(8.dp))
-                    .clickable { onCreateNewSession() }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    tint = NeonVioletLight,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (language == AppLanguage.AR) "جديدة" else "New",
-                    style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonVioletLight)
-                )
-            }
-        }
-
-        if (showSessionsSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showSessionsSheet = false },
-                containerColor = Color(0xFF0C1017),
-                contentColor = TextPrimary
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (language == AppLanguage.AR) "جلسات هيرمز على الكمبيوتر" else "Hermes Agent Sessions on PC",
-                            style = MonospaceStyle.copy(
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeonCyan
-                            )
-                        )
-                        IconButton(onClick = onRefreshSessions) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = NeonCyan)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    if (sessions.isEmpty()) {
-                        Text(
-                            text = if (isLoadingSessions) {
-                                if (language == AppLanguage.AR) "جاري تحميل الجلسات من السيرفر..." else "Loading sessions..."
-                            } else {
-                                if (language == AppLanguage.AR) "لا توجد جلسات محفوظة حتى الآن" else "No saved sessions found"
-                            },
-                            style = MonospaceStyle.copy(color = TextSecondary, fontSize = 12.sp),
-                            modifier = Modifier.padding(vertical = 20.dp)
-                        )
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(320.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(sessions) { s ->
-                                val isCurrent = s.id == currentSessionId
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isCurrent) NeonViolet.copy(alpha = 0.25f) else CyberSurfaceElevated)
-                                        .border(
-                                            1.dp,
-                                            if (isCurrent) NeonViolet else CyberSurfaceBorder,
-                                            RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable {
-                                            onSelectSession(s.id)
-                                            showSessionsSheet = false
-                                        }
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = s.title,
-                                            style = MonospaceStyle.copy(
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = if (isCurrent) NeonCyan else TextPrimary
-                                            ),
-                                            maxLines = 1
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "Model: ${s.model} • Msgs: ${s.messageCount}",
-                                            style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
-                                        )
-                                    }
-                                    if (isCurrent) {
-                                        Icon(Icons.Default.Check, contentDescription = null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
-            }
-        }
-
-        // Chat Message Stream
-        LazyColumn(
-            state = listState,
+        // Chat Message Stream with Floating Scroll-To-Bottom Button
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(messages, key = { it.id }) { message ->
-                ChatMessageItem(message = message, language = language)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                items(messages, key = { it.id }) { message ->
+                    ChatMessageItem(message = message, language = language)
+                }
+            }
+
+            // Floating Scroll-To-Bottom Button
+            val canScrollDown = remember {
+                derivedStateOf { listState.canScrollForward }
+            }
+            if (canScrollDown.value) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 12.dp)
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(CyberSurfaceElevated)
+                        .border(1.dp, NeonCyan, CircleShape)
+                        .clickable {
+                            scope.launch {
+                                listState.animateScrollToItem(messages.size - 1)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Scroll down",
+                        tint = NeonCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 
@@ -469,9 +363,10 @@ fun ChatTerminalScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 pendingImages.forEach { imgUrl ->
+                    val bitmap = remember(imgUrl) { dataUrlToBitmap(imgUrl).asImageBitmap() }
                     Box {
                         androidx.compose.foundation.Image(
-                            bitmap = dataUrlToBitmap(imgUrl).asImageBitmap(),
+                            bitmap = bitmap,
                             contentDescription = "Attachment",
                             modifier = Modifier
                                 .size(56.dp)
@@ -493,17 +388,51 @@ fun ChatTerminalScreen(
             }
         }
 
-        // Bottom Input Bar (imePadding only here so the bar sits above keyboard
-        // without pushing the whole chat content up / leaving a big gap)
+        // Interactive Approval Card (prominently shown above input)
+        if (activeApprovalRequest != null && onResolveApproval != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                InteractiveApprovalCard(
+                    request = activeApprovalRequest,
+                    language = language,
+                    onResolve = onResolveApproval
+                )
+            }
+        }
+
+        // Bottom Input Bar matching reference image (pill container with model selector inside)
         ChatInputBar(
             text = promptInput,
             language = language,
+            selectedModel = selectedModel,
+            onOpenModelSheet = { showAllModelsSheet = true },
             onTextChange = { promptInput = it },
             isStreaming = isStreaming,
             hasAttachments = pendingImages.isNotEmpty() || pendingFiles.isNotEmpty() || isUploading,
             onAttachClick = { showAttachSheet = true },
+            onVoiceInput = {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (language == AppLanguage.AR) "ar-SA" else "en-US")
+                    putExtra(RecognizerIntent.EXTRA_PROMPT, if (language == AppLanguage.AR) "تحدث الآن لتسجيل أمرك..." else "Speak your message...")
+                }
+                try {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    speechLauncher.launch(intent)
+                } catch (_: Exception) {
+                    android.widget.Toast.makeText(
+                        context,
+                        if (language == AppLanguage.AR) "خدمة التعرف الصوتي غير متوفرة" else "Voice recognition not available",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
             onSend = {
                 if (promptInput.isNotBlank() || pendingImages.isNotEmpty() || pendingFiles.isNotEmpty()) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     // Build the message text: prompt + uploaded file paths
                     var finalPrompt = promptInput
                     if (pendingFiles.isNotEmpty()) {
@@ -522,9 +451,26 @@ fun ChatTerminalScreen(
                     pendingFiles = emptyList()
                 }
             },
-            onStop = onStopStreaming,
+            onStop = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onStopStreaming()
+            },
             modifier = Modifier.imePadding()
         )
+
+        // Models Selection Sheet (triggered from bottom Model Pill)
+        if (showAllModelsSheet) {
+            ModelsSelectionBottomSheet(
+                selectedModel = selectedModel,
+                availableModels = availableModels,
+                language = language,
+                onSelectModel = {
+                    onSelectModel(it)
+                    showAllModelsSheet = false
+                },
+                onDismiss = { showAllModelsSheet = false }
+            )
+        }
 
         // Attach options bottom sheet (photo or file)
         if (showAttachSheet) {
@@ -620,289 +566,189 @@ fun ChatTerminalScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ModelSelectorRow(
+fun ModelsSelectionBottomSheet(
     selectedModel: AiModelInfo,
     availableModels: List<AiModelInfo>,
     language: AppLanguage,
     onSelectModel: (AiModelInfo) -> Unit,
-    modifier: Modifier = Modifier
+    onDismiss: () -> Unit
 ) {
     val models = if (availableModels.isNotEmpty()) availableModels else AvailableAiModels
-    var showAllModelsSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedProviderFilter by remember { mutableStateOf("ALL") }
 
-    val quickChips = remember(models, selectedModel) {
-        val list = mutableListOf<AiModelInfo>()
-        if (models.any { it.id == selectedModel.id }) {
-            list.add(selectedModel)
+    val providers = remember(models) {
+        listOf("ALL") + models.map { it.provider }.distinct().filter { it.isNotBlank() }
+    }
+    val filteredModels = remember(models, searchQuery, selectedProviderFilter) {
+        models.filter { m ->
+            val matchesSearch = searchQuery.isBlank() ||
+                m.displayName.contains(searchQuery, ignoreCase = true) ||
+                m.id.contains(searchQuery, ignoreCase = true) ||
+                m.provider.contains(searchQuery, ignoreCase = true)
+            val matchesProvider = selectedProviderFilter == "ALL" || m.provider == selectedProviderFilter
+            matchesSearch && matchesProvider
         }
-        for (m in models) {
-            if (list.size >= 7) break
-            if (m.id != selectedModel.id) {
-                list.add(m)
-            }
-        }
-        list
     }
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Color(0xFF0B0F15))
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF0C1017),
+        contentColor = TextPrimary
     ) {
-        Text(
-            text = HermesStrings.modelLabel(language),
-            style = MonospaceStyle.copy(
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary
-            )
-        )
-
-        // All Models Sheet Trigger Button
-        Row(
+        Column(
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(NeonCyan.copy(alpha = 0.15f))
-                .border(1.dp, NeonCyan, RoundedCornerShape(8.dp))
-                .clickable { showAllModelsSheet = true }
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = null,
-                tint = NeonCyan,
-                modifier = Modifier.size(13.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = if (language == AppLanguage.AR) "كل الموديلات (${models.size}) 🔍" else "All Models (${models.size}) 🔍",
-                style = MonospaceStyle.copy(
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = NeonCyan
-                )
-            )
-        }
-
-        // Quick Top Chips
-        quickChips.forEach { model ->
-            val isSelected = model.id == selectedModel.id
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isSelected) NeonViolet.copy(alpha = 0.25f) else CyberSurfaceElevated)
-                    .border(
-                        1.dp,
-                        if (isSelected) NeonViolet else CyberSurfaceBorder,
-                        RoundedCornerShape(8.dp)
-                    )
-                    .clickable { onSelectModel(model) }
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                    .testTag("model_chip_${model.id}"),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isSelected) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = null,
-                        tint = NeonVioletLight,
-                        modifier = Modifier.size(12.dp)
+                Column {
+                    Text(
+                        text = if (language == AppLanguage.AR) "موديلات هيرمز المتاحة" else "Available Hermes Models",
+                        style = MonospaceStyle.copy(
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeonCyan
+                        )
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (language == AppLanguage.AR) "${filteredModels.size} من أصل ${models.size} موديل" else "${filteredModels.size} of ${models.size} models",
+                        style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary)
+                    )
                 }
-                Text(
-                    text = model.displayName,
-                    style = MonospaceStyle.copy(
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isSelected) TextPrimary else TextSecondary
-                    )
-                )
-            }
-        }
-    }
-
-    if (showAllModelsSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showAllModelsSheet = false },
-            containerColor = CyberSurface
-        ) {
-            val providers = remember(models) {
-                listOf("ALL") + models.map { it.provider }.distinct()
-            }
-            val filteredModels = remember(models, searchQuery, selectedProviderFilter) {
-                models.filter { m ->
-                    val matchesSearch = searchQuery.isBlank() ||
-                        m.displayName.contains(searchQuery, ignoreCase = true) ||
-                        m.id.contains(searchQuery, ignoreCase = true) ||
-                        m.provider.contains(searchQuery, ignoreCase = true)
-                    val matchesProvider = selectedProviderFilter == "ALL" || m.provider == selectedProviderFilter
-                    matchesSearch && matchesProvider
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary)
                 }
             }
 
-            Column(
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Search Box
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(CyberSurfaceElevated)
+                    .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = if (language == AppLanguage.AR) "موديلات هيرمز المتاحة" else "Available Hermes Models",
-                            style = MonospaceStyle.copy(
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeonCyan
+                Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
+                    cursorBrush = SolidColor(NeonCyan),
+                    decorationBox = { innerTextField ->
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = if (language == AppLanguage.AR) "ابحث عن أي موديل بالاسم أو المزود..." else "Search models...",
+                                style = MonospaceStyle.copy(color = TextSecondary, fontSize = 12.sp)
                             )
-                        )
-                        Text(
-                            text = if (language == AppLanguage.AR) "${filteredModels.size} من أصل ${models.size} موديل" else "${filteredModels.size} of ${models.size} models",
-                            style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary)
-                        )
+                        }
+                        innerTextField()
                     }
-                    IconButton(onClick = { showAllModelsSheet = false }) {
+                )
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(16.dp)) {
                         Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary)
                     }
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Search Box
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(CyberSurfaceElevated)
-                        .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    BasicTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        modifier = Modifier.weight(1f),
-                        textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
-                        cursorBrush = SolidColor(NeonCyan),
-                        decorationBox = { innerTextField ->
-                            if (searchQuery.isEmpty()) {
-                                Text(
-                                    text = if (language == AppLanguage.AR) "ابحث عن أي موديل بالاسم أو المزود..." else "Search models...",
-                                    style = MonospaceStyle.copy(color = TextSecondary, fontSize = 12.sp)
-                                )
-                            }
-                            innerTextField()
-                        }
-                    )
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(16.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Provider Filter Chips
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    providers.forEach { prov ->
-                        val isProvSelected = prov == selectedProviderFilter
-                        val label = if (prov == "ALL") (if (language == AppLanguage.AR) "الكل" else "ALL") else prov
-                        Text(
-                            text = label,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (isProvSelected) NeonCyan.copy(alpha = 0.2f) else CyberSurfaceElevated)
-                                .border(1.dp, if (isProvSelected) NeonCyan else CyberSurfaceBorder, RoundedCornerShape(6.dp))
-                                .clickable { selectedProviderFilter = prov }
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                            style = MonospaceStyle.copy(
-                                fontSize = 11.sp,
-                                fontWeight = if (isProvSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isProvSelected) NeonCyan else TextSecondary
-                            )
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Models LazyColumn
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(360.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(filteredModels) { m ->
-                        val isSelected = m.id == selectedModel.id
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) NeonViolet.copy(alpha = 0.25f) else CyberSurfaceElevated)
-                                .border(1.dp, if (isSelected) NeonViolet else CyberSurfaceBorder, RoundedCornerShape(8.dp))
-                                .clickable {
-                                    onSelectModel(m)
-                                    showAllModelsSheet = false
-                                }
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = m.displayName,
-                                        style = MonospaceStyle.copy(
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) NeonVioletLight else TextPrimary
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = m.provider,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFF141E28))
-                                            .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                                        style = MonospaceStyle.copy(fontSize = 9.sp, color = NeonCyan)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(3.dp))
-                                Text(
-                                    text = m.id,
-                                    style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
-                                )
-                            }
-                            if (isSelected) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
             }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Provider Filter Chips
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                providers.forEach { prov ->
+                    val isProvSelected = prov == selectedProviderFilter
+                    val label = if (prov == "ALL") (if (language == AppLanguage.AR) "الكل" else "ALL") else prov
+                    Text(
+                        text = label,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isProvSelected) NeonCyan.copy(alpha = 0.2f) else CyberSurfaceElevated)
+                            .border(1.dp, if (isProvSelected) NeonCyan else CyberSurfaceBorder, RoundedCornerShape(6.dp))
+                            .clickable { selectedProviderFilter = prov }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MonospaceStyle.copy(
+                            fontSize = 11.sp,
+                            fontWeight = if (isProvSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isProvSelected) NeonCyan else TextSecondary
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Models LazyColumn
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(360.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredModels) { m ->
+                    val isSelected = m.id == selectedModel.id
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) NeonViolet.copy(alpha = 0.25f) else CyberSurfaceElevated)
+                            .border(1.dp, if (isSelected) NeonViolet else CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                            .clickable {
+                                onSelectModel(m)
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = m.displayName,
+                                    style = MonospaceStyle.copy(
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) NeonVioletLight else TextPrimary
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = m.provider,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFF141E28))
+                                        .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MonospaceStyle.copy(fontSize = 9.sp, color = NeonCyan)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = m.id,
+                                style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                            )
+                        }
+                        if (isSelected) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -963,8 +809,9 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                     // Attachment images (if any)
                     if (message.attachments.isNotEmpty()) {
                         message.attachments.forEach { imgUrl ->
+                            val bitmap = remember(imgUrl) { dataUrlToBitmap(imgUrl).asImageBitmap() }
                             androidx.compose.foundation.Image(
-                                bitmap = dataUrlToBitmap(imgUrl).asImageBitmap(),
+                                bitmap = bitmap,
                                 contentDescription = "Image",
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -976,14 +823,16 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                         }
                     }
                     if (message.content.isNotBlank()) {
-                        Text(
-                            text = message.content,
-                            style = MonospaceStyle.copy(
-                                fontSize = 13.5.sp,
-                                color = TextPrimary,
-                                lineHeight = 20.sp
+                        SelectionContainer {
+                            Text(
+                                text = message.content,
+                                style = MonospaceStyle.copy(
+                                    fontSize = 13.5.sp,
+                                    color = TextPrimary,
+                                    lineHeight = 20.sp
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -997,7 +846,9 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
             // Header Bar with Agent Name, Model Tag & Time
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 6.dp, start = 4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp, start = 4.dp, end = 4.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Bolt,
@@ -1050,6 +901,24 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                             .padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
+
+                Spacer(modifier = Modifier.weight(1f))
+                val clipboardManager = LocalClipboardManager.current
+                val ctx = LocalContext.current
+                IconButton(
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(message.content))
+                        Toast.makeText(ctx, if (language == AppLanguage.AR) "تم نسخ الرد بالكامل" else "Response copied", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
 
             // Message Bubble Card
@@ -1075,25 +944,27 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
 
                 // AI Conversational Text
                 if (message.content.isNotEmpty()) {
-                    Row {
-                        Text(
-                            text = message.content,
-                            style = MonospaceStyle.copy(
-                                fontSize = 13.5.sp,
-                                color = TextPrimary,
-                                lineHeight = 21.sp
-                            )
-                        )
-                        if (message.isStreaming) {
+                    SelectionContainer {
+                        Row {
                             Text(
-                                text = " ▋",
+                                text = message.content,
                                 style = MonospaceStyle.copy(
-                                    fontSize = 14.sp,
-                                    color = NeonCyan,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                modifier = Modifier.alpha(cursorAlpha)
+                                    fontSize = 13.5.sp,
+                                    color = TextPrimary,
+                                    lineHeight = 21.sp
+                                )
                             )
+                            if (message.isStreaming) {
+                                Text(
+                                    text = " ▋",
+                                    style = MonospaceStyle.copy(
+                                        fontSize = 14.sp,
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    modifier = Modifier.alpha(cursorAlpha)
+                                )
+                            }
                         }
                     }
                 } else if (message.isStreaming && message.toolExecutions.isEmpty()) {
@@ -1164,57 +1035,37 @@ fun QuickPresetPrompts(
 fun ChatInputBar(
     text: String,
     language: AppLanguage,
+    selectedModel: AiModelInfo,
+    onOpenModelSheet: () -> Unit,
     onTextChange: (String) -> Unit,
     isStreaming: Boolean,
     hasAttachments: Boolean = false,
     onAttachClick: () -> Unit = {},
+    onVoiceInput: (() -> Unit)? = null,
     onSend: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF0A0E14))
-            .border(width = 1.dp, color = CyberSurfaceBorder)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF131823))
+            .border(1.dp, Color(0xFF263345), RoundedCornerShape(22.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
-        // Attach (paperclip) button - pick images
-        if (!isStreaming) {
-            IconButton(
-                onClick = onAttachClick,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(if (hasAttachments) NeonCyan.copy(alpha = 0.2f) else Color.Transparent)
-                    .border(1.dp, if (hasAttachments) NeonCyan else Color(0xFF2E384D), CircleShape)
-                    .testTag("attach_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AttachFile,
-                    contentDescription = "Attach",
-                    tint = if (hasAttachments) NeonCyan else TextSecondary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(6.dp))
-        }
-
-        // Monospace Terminal Styled Input Field
+        // Multi-line Text Input Field
         Box(
             modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(CyberTerminalBg)
-                .border(1.dp, Color(0xFF1F2937), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .fillMaxWidth()
+                .heightIn(min = 28.dp, max = 120.dp)
         ) {
             if (text.isEmpty()) {
                 Text(
-                    text = HermesStrings.inputPlaceholder(language),
+                    text = if (language == AppLanguage.AR) "اكتب رسالتك أو الأمر..." else "Message...",
                     style = MonospaceStyle.copy(
-                        fontSize = 12.sp,
+                        fontSize = 13.5.sp,
                         color = TextSecondary.copy(alpha = 0.7f)
                     )
                 )
@@ -1223,63 +1074,148 @@ fun ChatInputBar(
                 value = text,
                 onValueChange = onTextChange,
                 textStyle = MonospaceStyle.copy(
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     color = TextPrimary
                 ),
                 cursorBrush = SolidColor(NeonCyan),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("chat_input_field")
             )
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
+        // Bottom Controls Row: [+] [ model ⌄ ] ... [ Send / Stop ]
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Left Action Group: [+] [ Model Pill ]
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Attach (+) button
+                if (!isStreaming) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(if (hasAttachments) NeonCyan.copy(alpha = 0.2f) else Color(0xFF1B2332))
+                            .border(1.dp, if (hasAttachments) NeonCyan else Color(0xFF323F54), CircleShape)
+                            .clickable { onAttachClick() }
+                            .testTag("attach_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Attach",
+                            tint = if (hasAttachments) NeonCyan else TextPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
 
-        // Send or Stop Streaming Button
-        if (isStreaming) {
-            IconButton(
-                onClick = onStop,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(NeonRed.copy(alpha = 0.2f))
-                    .border(1.dp, NeonRed, CircleShape)
-                    .testTag("stop_stream_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Stop,
-                    contentDescription = HermesStrings.stopStreaming(language),
-                    tint = NeonRed,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        } else {
-            val canSend = text.isNotBlank() || hasAttachments
-            IconButton(
-                onClick = onSend,
-                enabled = canSend,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(if (canSend) NeonViolet else Color(0xFF1F2633))
-                    .border(
-                        1.dp,
-                        if (canSend) NeonVioletLight else Color(0xFF2E384D),
-                        CircleShape
+                // Model Selector Pill [ model-name ⌄ ]
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF1B2332))
+                        .border(1.dp, Color(0xFF384961), RoundedCornerShape(16.dp))
+                        .clickable { onOpenModelSheet() }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .testTag("model_pill"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = selectedModel.displayName.take(18),
+                        style = MonospaceStyle.copy(
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        ),
+                        maxLines = 1
                     )
-                    .testTag("send_button")
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Select model",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+
+            // Right Action Group: [Mic] [Send / Stop]
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = HermesStrings.sendCommand(language),
-                    tint = if (canSend) Color.White else TextSecondary,
-                    modifier = Modifier.size(18.dp)
-                )
+                // Microphone Voice Dictation Button
+                if (!isStreaming && onVoiceInput != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1B2332))
+                            .border(1.dp, Color(0xFF323F54), CircleShape)
+                            .clickable { onVoiceInput() }
+                            .testTag("voice_input_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = if (language == AppLanguage.AR) "إملاء صوتي" else "Voice Dictation",
+                            tint = NeonCyan,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+
+                if (isStreaming) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(NeonRed.copy(alpha = 0.2f))
+                        .border(1.dp, NeonRed, CircleShape)
+                        .clickable { onStop() }
+                        .testTag("stop_stream_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Stop,
+                        contentDescription = HermesStrings.stopStreaming(language),
+                        tint = NeonRed,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            } else {
+                val canSend = text.isNotBlank() || hasAttachments
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(if (canSend) NeonViolet else Color(0xFF1C2230))
+                        .border(1.dp, if (canSend) NeonVioletLight else Color(0xFF2E384D), CircleShape)
+                        .clickable(enabled = canSend) { onSend() }
+                        .testTag("send_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = HermesStrings.sendCommand(language),
+                        tint = if (canSend) Color.White else TextSecondary.copy(alpha = 0.5f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
     }
+}
 }
 
 // ============ Attachment helpers ============
@@ -1357,55 +1293,56 @@ private fun queryDisplayName(context: Context, uri: Uri): String? {
 }
 
 /**
- * Upload a picked file to the PC gateway (/api/files) as base64 JSON.
+ * Upload a picked file to the PC gateway (/api/files) as base64 JSON using shared HermesNetworkClient.
  * Returns (absolutePathOnPC, displayName) on success, null on failure.
  */
 private suspend fun uploadFileToGateway(
     config: ConnectionConfig,
     context: Context,
     uri: Uri,
-    displayName: String
+    displayName: String,
+    language: AppLanguage
 ): Pair<String, String>? {
     return withContext(Dispatchers.IO) {
         try {
-            val input = context.contentResolver.openInputStream(uri) ?: return@withContext null
-            val bytes = input.readBytes()
-            input.close()
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return@withContext null
 
             // Cap ~9MB raw so base64 stays under the 10MB server limit
-            if (bytes.size > 9 * 1024 * 1024) return@withContext null
-
-            val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-            val payload = org.json.JSONObject().apply {
-                put("filename", displayName)
-                put("content_b64", b64)
+            if (bytes.size > 9 * 1024 * 1024) {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        if (language == AppLanguage.AR) "حجم الملف يتجاوز الحد الأقصى (9 ميجابايت)" else "File size exceeds 9MB limit",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                return@withContext null
             }
 
-            val client = okhttp3.OkHttpClient.Builder()
-                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-                .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
-
-            val body = payload.toString().toRequestBody("application/json".toMediaType())
-            val reqBuilder = okhttp3.Request.Builder()
-                .url("${config.baseUrl}/api/files")
-                .post(body)
-            if (config.apiKey.isNotBlank()) {
-                reqBuilder.addHeader("Authorization", "Bearer ${config.apiKey}")
-            }
-
-            client.newCall(reqBuilder.build()).execute().use { response ->
-                if (response.isSuccessful) {
-                    val json = org.json.JSONObject(response.body?.string() ?: "{}")
-                    val path = json.optString("path", "")
-                    if (path.isNotBlank()) {
-                        return@withContext Pair(path, displayName)
-                    }
+            val client = ee.oversight.hermes.data.HermesNetworkClient()
+            val result = client.uploadFile(config, displayName, bytes)
+            if (result.isSuccess) {
+                result.getOrNull()
+            } else {
+                withContext(Dispatchers.Main) {
+                    val msg = result.exceptionOrNull()?.localizedMessage ?: "Upload failed"
+                    android.widget.Toast.makeText(
+                        context,
+                        if (language == AppLanguage.AR) "فشل رفع الملف: $msg" else "File upload failed: $msg",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
                 }
                 null
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    context,
+                    if (language == AppLanguage.AR) "خطأ أثناء قراءة الملف" else "Error reading file: ${e.localizedMessage}",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
             null
         }
     }

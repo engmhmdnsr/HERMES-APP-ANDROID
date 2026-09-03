@@ -1,5 +1,7 @@
 package ee.oversight.hermes.model
 
+import java.util.Locale
+
 enum class ConnectionStatus {
     DISCONNECTED,
     CONNECTING,
@@ -66,6 +68,23 @@ data class ProcessInfo(
     val cpu: String
 )
 
+enum class ApprovalMode {
+    MANUAL,
+    ALLOW_SESSION,
+    ALLOW_ALL
+}
+
+data class ApprovalRequest(
+    val runId: String,
+    val callId: String? = null,
+    val sessionId: String? = null,
+    val toolName: String = "terminal",
+    val command: String = "",
+    val reason: String = "",
+    val message: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 enum class ToolStatus {
     RUNNING,
     COMPLETED,
@@ -117,10 +136,45 @@ val AvailableAiModels = listOf(
     )
 )
 
+data class TokenUsage(
+    val inputTokens: Long = 0L,
+    val outputTokens: Long = 0L,
+    val totalTokens: Long = 0L,
+    val reasoningTokens: Long = 0L
+) {
+    fun formatTotal(): String = formatTokenCount(totalTokens)
+    fun formatInput(): String = formatTokenCount(inputTokens)
+    fun formatOutput(): String = formatTokenCount(outputTokens)
+
+    companion object {
+        fun formatTokenCount(tokens: Long): String {
+            return when {
+                tokens < 1_000 -> "$tokens"
+                tokens < 1_000_000 -> String.format(Locale.US, "%.1fk", tokens / 1000.0)
+                else -> String.format(Locale.US, "%.2fM", tokens / 1000000.0)
+            }
+        }
+    }
+}
+
 data class HermesSession(
     val id: String,
     val title: String,
     val model: String = "default",
     val startedAt: Long = 0L,
-    val messageCount: Int = 0
-)
+    val messageCount: Int = 0,
+    val inputTokens: Long = 0L,
+    val outputTokens: Long = 0L,
+    val reasoningTokens: Long = 0L,
+    val isPinned: Boolean = false,
+    val isThread: Boolean = false,
+    val isArchived: Boolean = false
+) {
+    val totalTokens: Long get() = inputTokens + outputTokens
+    fun toTokenUsage(): TokenUsage = TokenUsage(
+        inputTokens = inputTokens,
+        outputTokens = outputTokens,
+        totalTokens = totalTokens,
+        reasoningTokens = reasoningTokens
+    )
+}

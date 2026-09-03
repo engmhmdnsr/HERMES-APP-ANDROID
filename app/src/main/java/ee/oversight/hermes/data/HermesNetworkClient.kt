@@ -37,6 +37,8 @@ sealed class StreamChunk {
     data class TextDelta(val text: String) : StreamChunk()
     data class ToolStart(val tool: ToolExecutionBlock) : StreamChunk()
     data class ToolOutput(val toolId: String, val output: String, val status: ToolStatus) : StreamChunk()
+    data class ApprovalNeeded(val request: ee.oversight.hermes.model.ApprovalRequest) : StreamChunk()
+    data class Usage(val inputTokens: Long, val outputTokens: Long, val totalTokens: Long) : StreamChunk()
     data class Error(val message: String) : StreamChunk()
     data object Done : StreamChunk()
 }
@@ -257,7 +259,7 @@ class HermesNetworkClient {
     // ------------------------------------------------------------------
     suspend fun fetchSessions(config: ConnectionConfig): Result<List<HermesSession>> = withContext(Dispatchers.IO) {
         try {
-            val url = "${config.baseUrl}/api/sessions?limit=50"
+            val url = "${config.baseUrl}/api/sessions?limit=100"
             val request = Request.Builder().url(url).authHeaders(config).get().build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
@@ -274,11 +276,19 @@ class HermesNetworkClient {
                         id = obj.getString("id"),
                         title = obj.optString("title").ifBlank { obj.getString("id") },
                         model = obj.optString("model", "default"),
-                        startedAt = (obj.optDouble("started_at", 0.0) * 1000).toLong(),
-                        messageCount = obj.optInt("message_count", 0)
+                        startedAt = (obj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
+                        messageCount = obj.optInt("message_count", 0),
+                        inputTokens = obj.optLong("input_tokens", 0L),
+                        outputTokens = obj.optLong("output_tokens", 0L),
+                        reasoningTokens = obj.optLong("reasoning_tokens", 0L),
+                        isPinned = obj.optBoolean("pinned", false) || obj.optBoolean("is_pinned", false),
+                        isThread = obj.optBoolean("is_thread", false) || obj.optString("type") == "thread",
+                        isArchived = obj.optBoolean("archived", false) || obj.optBoolean("is_archived", false)
                     )
                 )
             }
+            // Sort newest first
+            list.sortByDescending { it.startedAt }
             Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
@@ -287,37 +297,80 @@ class HermesNetworkClient {
 
     // ------------------------------------------------------------------
     // Session messages: GET /api/sessions/{id}/messages
-    // Returns {"object":"list","data":[{role,content,...}]} newest-last.
-    // We request order=oldest to display chronological.
+    // Paginates up to 10,000 messages and filters out internal tool JSON.
     // ------------------------------------------------------------------
     suspend fun fetchSessionMessages(config: ConnectionConfig, sessionId: String): Result<List<ChatMessage>> = withContext(Dispatchers.IO) {
         try {
-            val url = "${config.baseUrl}/api/sessions/$sessionId/messages?limit=200&order=oldest"
-            val request = Request.Builder().url(url).authHeaders(config).get().build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
-            }
-            val bodyStr = response.body?.string() ?: "{}"
-            val json = JSONObject(bodyStr)
-            val array = json.optJSONArray("data") ?: JSONArray()
             val list = mutableListOf<ChatMessage>()
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val role = obj.optString("role", "user")
-                val rawContent = obj.optString("content", "")
-                val content = if (role == "assistant") rawContent else rawContent
-                val ts = (obj.optDouble("timestamp", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
-                list.add(
-                    ChatMessage(
-                        id = obj.optString("id", i.toString()),
-                        sender = if (role == "assistant") MessageSender.HERMES else MessageSender.USER,
-                        timestamp = ts,
-                        content = content
+            var offset = 0
+            val limit = 500
+            val maxMessages = 10000
+
+            while (list.size < maxMessages) {
+                val url = "${config.baseUrl}/api/sessions/$sessionId/messages?limit=$limit&offset=$offset"
+                val request = Request.Builder().url(url).authHeaders(config).get().build()
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    if (list.isNotEmpty()) break
+                    return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val json = JSONObject(bodyStr)
+                val array = json.optJSONArray("data") ?: JSONArray()
+                if (array.length() == 0) break
+
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val role = obj.optString("role", "user")
+                    // Filter out tool output and internal system messages
+                    if (role == "tool" || role == "system") continue
+
+                    val rawContent = obj.optString("content", "")
+                    val trimmed = rawContent.trim()
+                    // Filter out raw JSON tool execution payloads
+                    if (trimmed.startsWith("{\"output\":") || 
+                        trimmed.startsWith("{\"total_count\":") || 
+                        (trimmed.startsWith("{\"success\":") && trimmed.contains("\"exit_code\""))) {
+                        continue
+                    }
+                    if (trimmed.isEmpty()) continue
+
+                    val ts = (obj.optDouble("timestamp", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
+                    list.add(
+                        ChatMessage(
+                            id = obj.optString("id", "${sessionId}_${offset + i}"),
+                            sender = if (role == "assistant") MessageSender.HERMES else MessageSender.USER,
+                            timestamp = ts,
+                            content = rawContent
+                        )
                     )
-                )
+                }
+
+                if (array.length() < limit) break
+                offset += array.length()
             }
+
+            // Ensure chronological order
+            list.sortBy { it.timestamp }
             Result.success(list)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Delete session: DELETE /api/sessions/{id}
+    // ------------------------------------------------------------------
+    suspend fun deleteSession(config: ConnectionConfig, sessionId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/sessions/$sessionId"
+            val request = Request.Builder().url(url).authHeaders(config).delete().build()
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                Result.success(true)
+            } else {
+                Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -492,8 +545,9 @@ class HermesNetworkClient {
             .post(body)
             .build()
 
+        val call = client.newCall(request)
         try {
-            val response = client.newCall(request).execute()
+            val response = call.execute()
             if (!response.isSuccessful) {
                 val errBody = response.body?.string() ?: ""
                 emit(StreamChunk.Error("Server error: HTTP ${response.code} ${errBody.take(300)}"))
@@ -506,6 +560,7 @@ class HermesNetworkClient {
                     return@flow
                 }
                 var sawContent = false
+                var currentEventName = ""
                 while (!source.exhausted()) {
                     val line = source.readUtf8Line() ?: break
                     if (line.startsWith("event:")) {
@@ -578,11 +633,40 @@ class HermesNetworkClient {
                                     ))
                                 }
                                 eventName == "assistant.completed" || eventName == "run.completed" -> {
+                                    val usageObj = json.optJSONObject("usage")
+                                    if (usageObj != null) {
+                                        val inTok = usageObj.optLong("input_tokens", 0L)
+                                        val outTok = usageObj.optLong("output_tokens", 0L)
+                                        val totTok = usageObj.optLong("total_tokens", inTok + outTok)
+                                        if (totTok > 0) {
+                                            emit(StreamChunk.Usage(inTok, outTok, totTok))
+                                        }
+                                    }
                                     val content = json.optString("content", "")
-                                    if (content.isNotEmpty()) {
+                                    // Only emit if no deltas were streamed to prevent text duplication
+                                    if (!sawContent && content.isNotEmpty()) {
                                         sawContent = true
                                         emit(StreamChunk.TextDelta(content))
                                     }
+                                }
+                                eventName == "approval.request" || eventName == "approval_required" || json.optString("type") == "approval.request" -> {
+                                    val runId = json.optString("run_id", json.optString("id", System.currentTimeMillis().toString()))
+                                    val callId = if (json.has("call_id")) json.getString("call_id") else null
+                                    val tool = json.optString("tool", json.optString("tool_name", "terminal"))
+                                    val command = json.optString("command", json.optString("payload", json.optString("preview", "")))
+                                    val reason = json.optString("reason", "")
+                                    val msg = json.optString("message", "Hermes requires approval to execute this action.")
+                                    emit(StreamChunk.ApprovalNeeded(
+                                        ee.oversight.hermes.model.ApprovalRequest(
+                                            runId = runId,
+                                            callId = callId,
+                                            sessionId = resolvedSessionId,
+                                            toolName = tool,
+                                            command = command,
+                                            reason = reason,
+                                            message = msg
+                                        )
+                                    ))
                                 }
                                 eventName == "error" -> {
                                     emit(StreamChunk.Error(json.optString("message", "Unknown error")))
@@ -600,10 +684,95 @@ class HermesNetworkClient {
             }
         } catch (e: Exception) {
             emit(StreamChunk.Error("Network stream error: ${e.localizedMessage}"))
+        } finally {
+            call.cancel()
         }
     }.flowOn(Dispatchers.IO)
 
-    private var currentEventName: String = ""
+    // ------------------------------------------------------------------
+    // File upload: POST /api/files (using shared OkHttpClient)
+    // ------------------------------------------------------------------
+    suspend fun uploadFile(
+        config: ConnectionConfig,
+        displayName: String,
+        bytes: ByteArray
+    ): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
+        try {
+            if (bytes.size > 9 * 1024 * 1024) {
+                return@withContext Result.failure(Exception("File size exceeds 9MB limit"))
+            }
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val payload = JSONObject().apply {
+                put("filename", displayName)
+                put("content_b64", b64)
+            }
+            val body = payload.toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder()
+                .url("${config.baseUrl}/api/files")
+                .authHeaders(config)
+                .post(body)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    val path = json.optString("path", "")
+                    if (path.isNotBlank()) {
+                        return@withContext Result.success(Pair(path, displayName))
+                    }
+                }
+                Result.failure(Exception("Upload failed (HTTP ${response.code}: ${response.message})"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitApproval(
+        config: ConnectionConfig,
+        runId: String,
+        approved: Boolean,
+        sessionId: String? = null
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val payload = JSONObject().apply {
+                put("approved", approved)
+                if (sessionId != null) put("session_id", sessionId)
+                put("run_id", runId)
+            }
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val body = payload.toString().toRequestBody(mediaType)
+
+            // Try /v1/runs/{runId}/approval first
+            val urlPrimary = "${config.baseUrl}/v1/runs/$runId/approval"
+            try {
+                val reqPrimary = Request.Builder()
+                    .url(urlPrimary)
+                    .authHeaders(config)
+                    .post(body)
+                    .build()
+                client.newCall(reqPrimary).execute().use { resp ->
+                    if (resp.isSuccessful) return@withContext Result.success(true)
+                }
+            } catch (_: Exception) {}
+
+            // Fallback to /api/sessions/{sessionId}/approval if sessionId available
+            if (sessionId != null) {
+                val urlFallback = "${config.baseUrl}/api/sessions/$sessionId/approval"
+                val reqFallback = Request.Builder()
+                    .url(urlFallback)
+                    .authHeaders(config)
+                    .post(body)
+                    .build()
+                client.newCall(reqFallback).execute().use { resp ->
+                    if (resp.isSuccessful) return@withContext Result.success(true)
+                }
+            }
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
     companion object {
         // If running against the old custom gateway (port 8080, FastAPI) these

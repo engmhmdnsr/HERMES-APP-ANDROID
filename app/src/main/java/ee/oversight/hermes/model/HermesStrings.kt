@@ -28,15 +28,19 @@ object HermesStrings {
 
     // Navigation Tabs
     fun tabChat(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "المحادثة / SSE"
-        AppLanguage.EN -> "CHAT / SSE"
+        AppLanguage.AR -> "شات"
+        AppLanguage.EN -> "CHAT"
+    }
+    fun tabTerminal(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "الطرفية"
+        AppLanguage.EN -> "TERMINAL"
     }
     fun tabTelemetry(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "الموارد والمراقبة"
+        AppLanguage.AR -> "المراقبة"
         AppLanguage.EN -> "TELEMETRY"
     }
     fun tabGateway(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "البوابة والإعدادات"
+        AppLanguage.AR -> "البوابة"
         AppLanguage.EN -> "GATEWAY"
     }
 

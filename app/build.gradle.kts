@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -12,20 +15,30 @@ android {
     applicationId = "ee.oversight.hermes"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 6
+    versionName = "1.4.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
     create("release") {
-      // Look for the keystore in the project root first, then env var override.
+      // Look for the keystore and credentials from env var, or local credentials file if present
+      val creds = Properties()
+      val credsFile = file("${rootDir}/keystore-credentials.txt")
+      if (credsFile.exists()) {
+        FileInputStream(credsFile).use { creds.load(it) }
+      }
+      val localKeystore = file("${rootDir}/hermes-control-release.jks")
       val envPath = System.getenv("KEYSTORE_PATH")
-      storeFile = file(envPath ?: "${rootDir}/hermes-control-release.jks")
-      storePassword = System.getenv("STORE_PASSWORD") ?: "change-me-store"
-      keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
-      keyPassword = System.getenv("KEY_PASSWORD") ?: "change-me-key"
+      storeFile = if (!envPath.isNullOrBlank() && file(envPath).exists()) {
+        file(envPath)
+      } else {
+        localKeystore
+      }
+      storePassword = System.getenv("STORE_PASSWORD") ?: creds.getProperty("STORE_PASSWORD") ?: ""
+      keyAlias = System.getenv("KEY_ALIAS") ?: creds.getProperty("KEY_ALIAS") ?: "upload"
+      keyPassword = System.getenv("KEY_PASSWORD") ?: creds.getProperty("KEY_PASSWORD") ?: ""
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -37,8 +50,9 @@ android {
 
   buildTypes {
     release {
-      isCrunchPngs = false
-      isMinifyEnabled = false
+      isCrunchPngs = true
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }

@@ -39,10 +39,10 @@ class ExampleUnitTest {
 
   @Test
   fun testHermesStringsLocalization() {
-    val enTitle = HermesStrings.remoteGatewayModeTitle(AppLanguage.EN)
-    val arTitle = HermesStrings.remoteGatewayModeTitle(AppLanguage.AR)
+    val enTitle = HermesStrings.gatewayTitle(AppLanguage.EN)
+    val arTitle = HermesStrings.gatewayTitle(AppLanguage.AR)
     assertNotEquals(enTitle, arTitle)
-    assertTrue(enTitle.contains("REMOTE GATEWAY", ignoreCase = true))
-    assertTrue(arTitle.contains("عن بعد"))
+    assertTrue(enTitle.contains("GATEWAY", ignoreCase = true))
+    assertTrue(arTitle.contains("بوابة"))
   }
 }

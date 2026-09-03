@@ -4,26 +4,40 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Lan
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import ee.oversight.hermes.ui.components.SessionsDrawerContent
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -38,6 +52,7 @@ import ee.oversight.hermes.model.HermesStrings
 import ee.oversight.hermes.ui.components.CyberpunkTopBar
 import ee.oversight.hermes.ui.screens.ChatTerminalScreen
 import ee.oversight.hermes.ui.screens.GatewayConfigScreen
+import ee.oversight.hermes.ui.screens.HermesTerminalScreen
 import ee.oversight.hermes.ui.screens.SystemMonitoringScreen
 import ee.oversight.hermes.ui.theme.CyberBg
 import ee.oversight.hermes.ui.theme.CyberSurface
@@ -47,7 +62,11 @@ import ee.oversight.hermes.ui.theme.NeonCyan
 import ee.oversight.hermes.ui.theme.NeonViolet
 import ee.oversight.hermes.ui.theme.TextPrimary
 import ee.oversight.hermes.ui.theme.TextSecondary
+import ee.oversight.hermes.ui.theme.TextTerminal
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MainScreen(
     viewModel: HermesViewModel = viewModel()
@@ -69,37 +88,103 @@ fun MainScreen(
     val availableModels by viewModel.availableModels.collectAsState()
     val isLoadingSessions by viewModel.isLoadingSessions.collectAsState()
     val appLogs by viewModel.appLogs.collectAsState()
+    val tokenUsage by viewModel.activeTokenUsage.collectAsState()
+    val pinnedSessionIds by viewModel.pinnedSessionIds.collectAsState()
+    val activeApprovalRequest by viewModel.activeApprovalRequest.collectAsState()
+    val globalAutoApprove by viewModel.globalAutoApprove.collectAsState()
+    val sessionAutoApproveIds by viewModel.sessionAutoApproveIds.collectAsState()
+    val isSessionAutoApproved = currentSessionId != null && sessionAutoApproveIds.contains(currentSessionId)
 
     val layoutDirection = if (language == AppLanguage.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val isImeVisible = WindowInsets.isImeVisible
+
     CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
-        Scaffold(
-            containerColor = CyberBg,
-            topBar = {
-                CyberpunkTopBar(
-                    status = status,
-                    config = config,
-                    pingMs = telemetry.pingMs,
-                    language = language
-                )
-            },
-            bottomBar = {
-                NavigationBar(
-                    containerColor = CyberSurface,
-                    modifier = Modifier
-                        .border(width = 1.dp, color = CyberSurfaceBorder)
-                        .testTag("main_navigation_bar")
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            gesturesEnabled = true,
+            drawerContent = {
+                ModalDrawerSheet(
+                    drawerContainerColor = Color(0xFF0A0D15),
+                    drawerContentColor = TextPrimary,
+                    modifier = Modifier.fillMaxWidth(0.88f)
                 ) {
-                    // Tab 1: Terminal & Chat
-                    val isTerminal = activeTab == AppTab.TERMINAL
+                    SessionsDrawerContent(
+                        sessions = sessions,
+                        currentSessionId = currentSessionId,
+                        isLoading = isLoadingSessions,
+                        language = language,
+                        pinnedSessionIds = pinnedSessionIds,
+                        onTogglePinSession = { id -> viewModel.togglePinSession(id) },
+                        onSelectSession = { id ->
+                            viewModel.selectSession(id)
+                            scope.launch { drawerState.close() }
+                        },
+                        onCreateNewSession = {
+                            viewModel.createNewSession()
+                            scope.launch { drawerState.close() }
+                        },
+                        onDeleteSession = { id ->
+                            viewModel.deleteSession(id)
+                        },
+                        onExportSession = { id, title ->
+                            viewModel.exportSessionAsMarkdown(id, title, context)
+                        },
+                        onRefreshSessions = {
+                            viewModel.loadSessions()
+                        },
+                        onClose = {
+                            scope.launch { drawerState.close() }
+                        }
+                    )
+                }
+            }
+        ) {
+            Scaffold(
+                containerColor = CyberBg,
+                topBar = {
+                    CyberpunkTopBar(
+                        status = status,
+                        config = config,
+                        pingMs = telemetry.pingMs,
+                        tokenUsage = tokenUsage,
+                        language = language,
+                        onOpenDrawer = {
+                            scope.launch {
+                                if (drawerState.isClosed) drawerState.open() else drawerState.close()
+                            }
+                        },
+                        globalAutoApprove = globalAutoApprove,
+                        isSessionAutoApproved = isSessionAutoApproved,
+                        onToggleGlobalAutoApprove = { enabled ->
+                            viewModel.setGlobalAutoApprove(enabled)
+                        },
+                        onTriggerTestApproval = {
+                            viewModel.triggerMockApproval()
+                        }
+                    )
+                },
+                bottomBar = {
+                    if (!isImeVisible) {
+                        NavigationBar(
+                            containerColor = CyberSurface,
+                            modifier = Modifier
+                                .border(width = 1.dp, color = CyberSurfaceBorder)
+                                .testTag("main_navigation_bar")
+                        ) {
+                    // Tab 1: Chat
+                    val isChat = activeTab == AppTab.CHAT
                     NavigationBarItem(
-                        selected = isTerminal,
-                        onClick = { viewModel.setActiveTab(AppTab.TERMINAL) },
+                        selected = isChat,
+                        onClick = { viewModel.setActiveTab(AppTab.CHAT) },
                         icon = {
                             Icon(
-                                imageVector = if (isTerminal) Icons.Filled.Terminal else Icons.Outlined.Terminal,
+                                imageVector = if (isChat) Icons.Filled.Chat else Icons.Outlined.Chat,
                                 contentDescription = HermesStrings.tabChat(language),
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         },
                         label = {
@@ -107,7 +192,7 @@ fun MainScreen(
                                 text = HermesStrings.tabChat(language),
                                 style = MonospaceStyle.copy(
                                     fontSize = 10.sp,
-                                    fontWeight = if (isTerminal) FontWeight.Bold else FontWeight.Normal
+                                    fontWeight = if (isChat) FontWeight.Bold else FontWeight.Normal
                                 )
                             )
                         },
@@ -118,10 +203,41 @@ fun MainScreen(
                             unselectedTextColor = TextSecondary,
                             indicatorColor = NeonViolet.copy(alpha = 0.2f)
                         ),
+                        modifier = Modifier.testTag("nav_chat")
+                    )
+
+                    // Tab 2: Terminal (Between Chat and Telemetry)
+                    val isTerminal = activeTab == AppTab.TERMINAL
+                    NavigationBarItem(
+                        selected = isTerminal,
+                        onClick = { viewModel.setActiveTab(AppTab.TERMINAL) },
+                        icon = {
+                            Icon(
+                                imageVector = if (isTerminal) Icons.Filled.Terminal else Icons.Outlined.Terminal,
+                                contentDescription = HermesStrings.tabTerminal(language),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = HermesStrings.tabTerminal(language),
+                                style = MonospaceStyle.copy(
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isTerminal) FontWeight.Bold else FontWeight.Normal
+                                )
+                            )
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = TextTerminal,
+                            selectedTextColor = TextPrimary,
+                            unselectedIconColor = TextSecondary,
+                            unselectedTextColor = TextSecondary,
+                            indicatorColor = TextTerminal.copy(alpha = 0.2f)
+                        ),
                         modifier = Modifier.testTag("nav_terminal")
                     )
 
-                    // Tab 2: System Telemetry
+                    // Tab 3: System Telemetry
                     val isTelemetry = activeTab == AppTab.TELEMETRY
                     NavigationBarItem(
                         selected = isTelemetry,
@@ -130,7 +246,7 @@ fun MainScreen(
                             Icon(
                                 imageVector = if (isTelemetry) Icons.Filled.MonitorHeart else Icons.Outlined.MonitorHeart,
                                 contentDescription = HermesStrings.tabTelemetry(language),
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         },
                         label = {
@@ -152,7 +268,7 @@ fun MainScreen(
                         modifier = Modifier.testTag("nav_telemetry")
                     )
 
-                    // Tab 3: Gateway & Tailscale
+                    // Tab 4: Gateway & Tailscale
                     val isGateway = activeTab == AppTab.GATEWAY
                     NavigationBarItem(
                         selected = isGateway,
@@ -161,7 +277,7 @@ fun MainScreen(
                             Icon(
                                 imageVector = if (isGateway) Icons.Filled.Lan else Icons.Outlined.Lan,
                                 contentDescription = HermesStrings.tabGateway(language),
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         },
                         label = {
@@ -184,14 +300,16 @@ fun MainScreen(
                     )
                 }
             }
-        ) { innerPadding ->
+        }
+    ) { innerPadding ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .consumeWindowInsets(innerPadding)
                     .padding(innerPadding)
             ) {
                 when (activeTab) {
-                    AppTab.TERMINAL -> {
+                    AppTab.CHAT -> {
                         ChatTerminalScreen(
                             messages = chatMessages,
                             isStreaming = isStreaming,
@@ -207,7 +325,21 @@ fun MainScreen(
                             onCreateNewSession = { viewModel.createNewSession() },
                             onRefreshSessions = { viewModel.loadSessions() },
                             onSendMessage = { text, attachments -> viewModel.sendMessage(text, attachments) },
-                            onStopStreaming = { viewModel.stopStreaming() }
+                            onStopStreaming = { viewModel.stopStreaming() },
+                            activeApprovalRequest = activeApprovalRequest,
+                            onResolveApproval = { req, approved, mode ->
+                                viewModel.resolveApproval(req, approved, mode)
+                            }
+                        )
+                    }
+                    AppTab.TERMINAL -> {
+                        HermesTerminalScreen(
+                            viewModel = viewModel,
+                            config = config,
+                            status = status,
+                            telemetry = telemetry,
+                            language = language,
+                            currentSessionId = currentSessionId
                         )
                     }
                     AppTab.TELEMETRY -> {
@@ -244,6 +376,7 @@ fun MainScreen(
                     }
                 }
             }
+        }
         }
     }
 }

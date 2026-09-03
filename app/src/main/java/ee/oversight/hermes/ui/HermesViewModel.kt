@@ -1,6 +1,9 @@
 package ee.oversight.hermes.ui
 
 import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ee.oversight.hermes.data.HermesAppLog
@@ -10,6 +13,8 @@ import ee.oversight.hermes.data.PingResult
 import ee.oversight.hermes.data.StreamChunk
 import ee.oversight.hermes.model.AiModelInfo
 import ee.oversight.hermes.model.AppLanguage
+import ee.oversight.hermes.model.ApprovalMode
+import ee.oversight.hermes.model.ApprovalRequest
 import ee.oversight.hermes.model.AvailableAiModels
 import ee.oversight.hermes.model.ChatMessage
 import ee.oversight.hermes.model.ConnectionConfig
@@ -18,6 +23,7 @@ import ee.oversight.hermes.model.DiscoveredGateway
 import ee.oversight.hermes.model.HermesSession
 import ee.oversight.hermes.model.MessageSender
 import ee.oversight.hermes.model.SystemTelemetry
+import ee.oversight.hermes.model.TokenUsage
 import ee.oversight.hermes.model.ToolStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -29,6 +35,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 enum class AppTab {
+    CHAT,
     TERMINAL,
     TELEMETRY,
     GATEWAY
@@ -58,7 +65,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     )
     val selectedModel: StateFlow<AiModelInfo> = _selectedModel.asStateFlow()
 
-    private val _activeTab = MutableStateFlow(AppTab.TERMINAL)
+    private val _activeTab = MutableStateFlow(AppTab.CHAT)
     val activeTab: StateFlow<AppTab> = _activeTab.asStateFlow()
 
     private val _pingResult = MutableStateFlow<PingResult?>(null)
@@ -88,6 +95,107 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _isLoadingSessions = MutableStateFlow(false)
     val isLoadingSessions: StateFlow<Boolean> = _isLoadingSessions.asStateFlow()
 
+    private val _activeTokenUsage = MutableStateFlow(TokenUsage())
+    val activeTokenUsage: StateFlow<TokenUsage> = _activeTokenUsage.asStateFlow()
+
+    private val _pinnedSessionIds = MutableStateFlow<Set<String>>(prefsRepo.getPinnedSessionIds())
+    val pinnedSessionIds: StateFlow<Set<String>> = _pinnedSessionIds.asStateFlow()
+
+    fun togglePinSession(sessionId: String) {
+        _pinnedSessionIds.update { set ->
+            val next = if (set.contains(sessionId)) set - sessionId else set + sessionId
+            prefsRepo.savePinnedSessionIds(next)
+            next
+        }
+    }
+
+    // Interactive Approval Cards & Control Modes
+    private val _activeApprovalRequest = MutableStateFlow<ApprovalRequest?>(null)
+    val activeApprovalRequest: StateFlow<ApprovalRequest?> = _activeApprovalRequest.asStateFlow()
+
+    private val _globalAutoApprove = MutableStateFlow(prefsRepo.getGlobalAutoApprove())
+    val globalAutoApprove: StateFlow<Boolean> = _globalAutoApprove.asStateFlow()
+
+    private val _sessionAutoApproveIds = MutableStateFlow<Set<String>>(emptySet())
+    val sessionAutoApproveIds: StateFlow<Set<String>> = _sessionAutoApproveIds.asStateFlow()
+
+    fun setGlobalAutoApprove(enabled: Boolean) {
+        _globalAutoApprove.value = enabled
+        prefsRepo.saveGlobalAutoApprove(enabled)
+        HermesAppLog.info("Global Auto-Approve set to: $enabled")
+    }
+
+    fun isSessionAutoApproved(sessionId: String?): Boolean {
+        if (_globalAutoApprove.value) return true
+        if (sessionId == null) return false
+        return _sessionAutoApproveIds.value.contains(sessionId)
+    }
+
+    fun toggleSessionAutoApprove(sessionId: String) {
+        _sessionAutoApproveIds.update { set ->
+            if (set.contains(sessionId)) set - sessionId else set + sessionId
+        }
+    }
+
+    fun resolveApproval(
+        request: ApprovalRequest,
+        approved: Boolean,
+        mode: ApprovalMode = ApprovalMode.MANUAL
+    ) {
+        viewModelScope.launch {
+            when (mode) {
+                ApprovalMode.ALLOW_ALL -> {
+                    _globalAutoApprove.value = true
+                    prefsRepo.saveGlobalAutoApprove(true)
+                    HermesAppLog.info("Activated ALLOW ALL (Global Autonomous Mode)")
+                }
+                ApprovalMode.ALLOW_SESSION -> {
+                    val sid = request.sessionId ?: _currentSessionId.value
+                    if (sid != null) {
+                        _sessionAutoApproveIds.update { it + sid }
+                        HermesAppLog.info("Activated ALLOW SESSION for: $sid")
+                    }
+                }
+                ApprovalMode.MANUAL -> {
+                    // Single run decision
+                }
+            }
+
+            networkClient.submitApproval(
+                config = _config.value,
+                runId = request.runId,
+                approved = approved,
+                sessionId = request.sessionId ?: _currentSessionId.value
+            )
+
+            val resolutionBadge = if (approved) {
+                when (mode) {
+                    ApprovalMode.ALLOW_ALL -> "🛡️ [APPROVED: ALLOW ALL] ${request.command}"
+                    ApprovalMode.ALLOW_SESSION -> "🛡️ [APPROVED: SESSION] ${request.command}"
+                    ApprovalMode.MANUAL -> "✓ [APPROVED] ${request.command}"
+                }
+            } else {
+                "✗ [DENIED BY USER] ${request.command}"
+            }
+            HermesAppLog.info("Approval resolved: $resolutionBadge")
+            _activeApprovalRequest.value = null
+        }
+    }
+
+    fun triggerMockApproval(
+        command: String = "sudo systemctl restart hermes-agent",
+        reason: String = "Reload agent configuration and apply system service updates"
+    ) {
+        _activeApprovalRequest.value = ApprovalRequest(
+            runId = "mock_${System.currentTimeMillis()}",
+            sessionId = _currentSessionId.value,
+            toolName = "terminal",
+            command = command,
+            reason = reason,
+            message = "Hermes Agent requires security approval to execute this command on host PC."
+        )
+    }
+
     // In-app logs (viewable from Gateway -> About)
     private val _appLogs = MutableStateFlow<List<HermesAppLog.LogEntry>>(HermesAppLog.all())
     val appLogs: StateFlow<List<HermesAppLog.LogEntry>> = _appLogs.asStateFlow()
@@ -102,20 +210,64 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private var telemetryPollingJob: Job? = null
+    private var healthPollingJob: Job? = null
     private var streamingJob: Job? = null
     private var chatPollingJob: Job? = null
     private var pendingSend: String? = null
     private var pendingAttachments: List<String> = emptyList()
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     init {
         // Start with empty chat (no fake welcome) until a session loads.
         _chatMessages.value = emptyList()
         startTelemetryPolling()
         startChatPolling()
+        startHealthPolling()
+        registerNetworkCallback()
         // If the user already has a saved config, try connecting automatically.
         if (_config.value.tailscaleIp.isNotBlank()) {
             testPing()
         }
+    }
+
+    private fun registerNetworkCallback() {
+        try {
+            val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            if (cm != null) {
+                val callback = object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        viewModelScope.launch {
+                            HermesAppLog.info("Network reconnected. Triggering auto-recovery...")
+                            if (_config.value.tailscaleIp.isNotBlank()) {
+                                testPing()
+                                loadSessions()
+                            }
+                        }
+                    }
+
+                    override fun onLost(network: Network) {
+                        viewModelScope.launch {
+                            HermesAppLog.info("Network connection lost")
+                            _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                        }
+                    }
+                }
+                cm.registerDefaultNetworkCallback(callback)
+                networkCallback = callback
+            }
+        } catch (e: Exception) {
+            HermesAppLog.warn("Could not register default network callback: ${e.message}")
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            networkCallback?.let {
+                val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                cm?.unregisterNetworkCallback(it)
+            }
+        } catch (_: Exception) {}
     }
 
     fun startAutoDiscovery() {
@@ -149,6 +301,53 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         prefsRepo.saveAppLanguage(language)
     }
 
+    /**
+     * Periodic /health check that owns connection state.
+     * Uses the user-entered config (IP + PORT from the gateway page) on every
+     * request. Recovers to CONNECTED automatically when the gateway comes back,
+     * and only goes DISCONNECTED after repeated real failures — so the app
+     * never flakes to offline because telemetry failed.
+     */
+    private fun startHealthPolling() {
+        healthPollingJob?.cancel()
+        healthPollingJob = viewModelScope.launch {
+            var consecutiveFailures = 0
+            while (isActive) {
+                val cfg = _config.value
+                if (cfg.tailscaleIp.isBlank()) {
+                    delay(5000)
+                    continue
+                }
+                // Only actively probe when we're not already streaming (SSE
+                // traffic itself is proof of life) and chat is being watched.
+                if (_isStreaming.value) {
+                    consecutiveFailures = 0
+                    _connectionStatus.value = ConnectionStatus.CONNECTED
+                    delay(15000)
+                    continue
+                }
+                val result = networkClient.ping(cfg)
+                if (result.isSuccess) {
+                    _connectionStatus.value = ConnectionStatus.CONNECTED
+                    consecutiveFailures = 0
+                    // If we were in an error state, also refresh data so the UI
+                    // is immediately useful again after a reconnect.
+                    if (_pingResult.value?.isSuccess != true) {
+                        loadSessions()
+                    }
+                } else {
+                    consecutiveFailures++
+                    if (consecutiveFailures >= 3) {
+                        _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                    } else {
+                        _connectionStatus.value = ConnectionStatus.ERROR
+                    }
+                }
+                delay(15000)
+            }
+        }
+    }
+
     private fun startTelemetryPolling() {
         telemetryPollingJob?.cancel()
         telemetryPollingJob = viewModelScope.launch {
@@ -159,27 +358,36 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     delay(3000)
                     continue
                 }
+                // Poll less frequently when not viewing the Telemetry tab to save battery and bandwidth
+                val isTelemetryTab = _activeTab.value == AppTab.TELEMETRY
+                val pollDelay = if (isTelemetryTab) 4000L else 20000L
+
                 val result = networkClient.fetchMetrics(_config.value)
                 if (result.isSuccess) {
                     result.getOrNull()?.let { newMetrics ->
                         _telemetry.value = newMetrics
                     }
-                    _connectionStatus.value = ConnectionStatus.CONNECTED
                     consecutiveFailures = 0
                 } else {
                     consecutiveFailures++
-                    // 3 consecutive failures (~15s) = host unreachable
-                    if (consecutiveFailures >= 3) {
-                        _connectionStatus.value = ConnectionStatus.DISCONNECTED
-                    }
+                    // Telemetry is best-effort: a failing /api/system (e.g. old
+                    // server without the endpoint) must NEVER flip the app to
+                    // offline. Connection state is owned by health polling only.
                 }
-                delay(5000)
+                delay(pollDelay)
             }
         }
     }
 
     fun setActiveTab(tab: AppTab) {
+        val prev = _activeTab.value
         _activeTab.value = tab
+        if (tab == AppTab.TELEMETRY && prev != AppTab.TELEMETRY && _config.value.tailscaleIp.isNotBlank()) {
+            viewModelScope.launch {
+                val result = networkClient.fetchMetrics(_config.value)
+                result.getOrNull()?.let { _telemetry.value = it }
+            }
+        }
     }
 
     /**
@@ -187,6 +395,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
      * Keeps the chat live when messages arrive from elsewhere without
      * manual refresh. Skips polling while streaming (SSE already appends
      * live deltas) and while the chat tab is not visible to reduce load.
+     * Preserves locally streamed tool executions and attachments so they
+     * aren't wiped when server returns plain text turn history.
      */
     private fun startChatPolling() {
         chatPollingJob?.cancel()
@@ -195,12 +405,28 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 val sid = _currentSessionId.value
                 val streaming = _isStreaming.value
                 val hasConfig = _config.value.tailscaleIp.isNotBlank()
-                val chatVisible = _activeTab.value == AppTab.TERMINAL
+                val chatVisible = _activeTab.value == AppTab.CHAT
                 if (sid != null && !streaming && hasConfig && chatVisible) {
                     val result = networkClient.fetchSessionMessages(_config.value, sid)
                     result.onSuccess { msgs ->
-                        if (msgs.isNotEmpty() && msgs != _chatMessages.value) {
-                            _chatMessages.value = msgs
+                        if (msgs.isNotEmpty()) {
+                            val currentMsgs = _chatMessages.value
+                            val merged = msgs.map { newMsg ->
+                                val existing = currentMsgs.find {
+                                    it.id == newMsg.id || (it.sender == newMsg.sender && it.content == newMsg.content)
+                                }
+                                if (existing != null) {
+                                    newMsg.copy(
+                                        toolExecutions = if (newMsg.toolExecutions.isEmpty()) existing.toolExecutions else newMsg.toolExecutions,
+                                        attachments = if (newMsg.attachments.isEmpty()) existing.attachments else newMsg.attachments
+                                    )
+                                } else {
+                                    newMsg
+                                }
+                            }
+                            if (merged != currentMsgs) {
+                                _chatMessages.value = merged
+                            }
                         }
                     }
                 }
@@ -213,6 +439,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         _config.value = newConfig
         prefsRepo.saveConnectionConfig(newConfig)
         testPing()
+        startHealthPolling()
         startTelemetryPolling()
         startChatPolling()
     }
@@ -278,22 +505,77 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             _isLoadingSessions.value = true
             val result = networkClient.fetchSessions(_config.value)
             result.onSuccess { list ->
-                _sessions.value = list
-                if (_currentSessionId.value == null && list.isNotEmpty()) {
-                    // Prefer a session that actually has messages
-                    val withMsgs = list.firstOrNull { it.messageCount > 0 } ?: list.first()
-                    selectSession(withMsgs.id)
+                val sorted = list.sortedByDescending { it.startedAt }
+                _sessions.value = sorted
+                val active = sorted.find { it.id == _currentSessionId.value }
+                if (active != null) {
+                    _activeTokenUsage.value = active.toTokenUsage()
+                } else if (sorted.isNotEmpty()) {
+                    _activeTokenUsage.value = sorted.first().toTokenUsage()
+                }
+                if (_currentSessionId.value == null && sorted.isNotEmpty()) {
+                    selectSession(sorted.first().id)
                 }
             }
             _isLoadingSessions.value = false
         }
     }
 
+    fun deleteSession(sessionId: String) {
+        viewModelScope.launch {
+            networkClient.deleteSession(_config.value, sessionId).onSuccess {
+                _sessions.update { list -> list.filter { it.id != sessionId } }
+                if (_currentSessionId.value == sessionId) {
+                    val next = _sessions.value.firstOrNull()
+                    if (next != null) {
+                        selectSession(next.id)
+                    } else {
+                        createNewSession()
+                    }
+                }
+            }
+        }
+    }
+
+    fun exportSessionAsMarkdown(sessionId: String, title: String, context: android.content.Context) {
+        viewModelScope.launch {
+            val result = networkClient.fetchSessionMessages(_config.value, sessionId)
+            val msgs = result.getOrNull() ?: _chatMessages.value
+            val sb = StringBuilder("# Hermes Session: $title\n")
+            sb.append("ID: $sessionId\n")
+            sb.append("Date: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date())}\n\n---\n\n")
+
+            msgs.forEach { m ->
+                val senderName = if (m.sender == MessageSender.USER) "### 👤 User" else "### 🤖 Hermes"
+                sb.append("$senderName\n")
+                sb.append("${m.content}\n\n")
+                if (m.toolExecutions.isNotEmpty()) {
+                    m.toolExecutions.forEach { t ->
+                        sb.append("```bash\n# [TOOL: ${t.toolName}]\n$ ${t.command}\n${t.output}\n```\n\n")
+                    }
+                }
+            }
+
+            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_SUBJECT, "Hermes Session: $title")
+                putExtra(android.content.Intent.EXTRA_TEXT, sb.toString())
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val chooser = android.content.Intent.createChooser(shareIntent, "Share Hermes Session")
+            chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        }
+    }
+
     fun selectSession(sessionId: String) {
         _currentSessionId.value = sessionId
         HermesAppLog.info("Opened session: ${sessionId.take(20)}...")
-        // Show session's model in the picker if known
+        // Show session's model and tokens in the picker / bar
         val s = _sessions.value.find { it.id == sessionId }
+        if (s != null) {
+            _activeTokenUsage.value = s.toTokenUsage()
+        }
         if (s != null && s.model.isNotBlank() && s.model != "default") {
             val known = _availableModels.value.find { it.id == s.model }
             if (known != null) _selectedModel.value = known
@@ -316,7 +598,21 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             val result = networkClient.fetchSessionMessages(_config.value, sessionId)
             result.onSuccess { msgs ->
                 if (msgs.isNotEmpty()) {
-                    _chatMessages.value = msgs
+                    val currentMsgs = _chatMessages.value
+                    val merged = msgs.map { newMsg ->
+                        val existing = currentMsgs.find {
+                            it.id == newMsg.id || (it.sender == newMsg.sender && it.content == newMsg.content)
+                        }
+                        if (existing != null) {
+                            newMsg.copy(
+                                toolExecutions = if (newMsg.toolExecutions.isEmpty()) existing.toolExecutions else newMsg.toolExecutions,
+                                attachments = if (newMsg.attachments.isEmpty()) existing.attachments else newMsg.attachments
+                            )
+                        } else {
+                            newMsg
+                        }
+                    }
+                    _chatMessages.value = merged
                 } else {
                     _chatMessages.value = listOf(
                         ChatMessage(
@@ -329,6 +625,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+    }
+
+    suspend fun uploadFile(displayName: String, bytes: ByteArray): Result<Pair<String, String>> {
+        return networkClient.uploadFile(_config.value, displayName, bytes)
     }
 
     fun createNewSession(title: String? = null, thenSend: String? = null) {
@@ -488,6 +788,44 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                                     }
                                     msg.copy(toolExecutions = updatedTools)
                                 } else msg
+                            }
+                        }
+                    }
+                    is StreamChunk.ApprovalNeeded -> {
+                        val req = chunk.request
+                        val autoApprove = _globalAutoApprove.value || (_currentSessionId.value != null && _sessionAutoApproveIds.value.contains(_currentSessionId.value))
+                        if (autoApprove) {
+                            HermesAppLog.info("Auto-approving run ${req.runId} (${req.command})")
+                            viewModelScope.launch {
+                                networkClient.submitApproval(
+                                    _config.value,
+                                    req.runId,
+                                    approved = true,
+                                    sessionId = _currentSessionId.value
+                                )
+                            }
+                        } else {
+                            HermesAppLog.info("Interactive approval requested: ${req.command}")
+                            _activeApprovalRequest.value = req
+                        }
+                    }
+                    is StreamChunk.Usage -> {
+                        _activeTokenUsage.value = TokenUsage(
+                            inputTokens = chunk.inputTokens,
+                            outputTokens = chunk.outputTokens,
+                            totalTokens = chunk.totalTokens
+                        )
+                        val sid = _currentSessionId.value
+                        if (sid != null) {
+                            _sessions.update { list ->
+                                list.map { s ->
+                                    if (s.id == sid) {
+                                        s.copy(
+                                            inputTokens = chunk.inputTokens,
+                                            outputTokens = chunk.outputTokens
+                                        )
+                                    } else s
+                                }
                             }
                         }
                     }

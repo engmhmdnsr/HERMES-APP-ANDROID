@@ -69,17 +69,6 @@ curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8080/health
 3. Enter your PC's **Tailscale IP** (e.g. `100.124.105.88`), **port** `8080`, and the **API_SERVER_KEY** from `.env`.
 4. Tap **TEST PING** - you should see `PEER HANDSHAKE SUCCESSFUL`.
 5. The app auto-loads your sessions and the live model list.
-
-### QR pairing (optional)
-
-The official API server does not serve a QR page. You can build your own pairing QR by encoding:
-
-```
-hermes://connect?ip=100.124.105.88&port=8080&key=<API_SERVER_KEY>
-```
-
-The app accepts that deep link / QR text on the Gateway tab.
-
 ---
 
 ## API endpoints used by the app

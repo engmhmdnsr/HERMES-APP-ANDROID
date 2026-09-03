@@ -57,7 +57,9 @@ fun SystemMetricCircularCard(
     accentColor: Color,
     modifier: Modifier = Modifier
 ) {
-    val progress = (currentValue / maxValue).coerceIn(0f, 1f)
+    val progress = if (maxValue > 0f && !currentValue.isNaN() && !maxValue.isNaN()) {
+        (currentValue / maxValue).coerceIn(0f, 1f)
+    } else 0f
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
         animationSpec = tween(500),

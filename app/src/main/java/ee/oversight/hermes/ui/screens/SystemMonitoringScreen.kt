@@ -138,14 +138,26 @@ fun SystemMonitoringScreen(
                     modifier = Modifier.weight(1f)
                 )
 
-                val ramPercent = (telemetry.ramUsedGb / telemetry.ramTotalGb) * 100f
-                val freeGb = telemetry.ramTotalGb - telemetry.ramUsedGb
+                val ramPercent = if (telemetry.ramTotalGb > 0f) {
+                    ((telemetry.ramUsedGb / telemetry.ramTotalGb) * 100f).coerceIn(0f, 100f)
+                } else 0f
+                val freeGb = (telemetry.ramTotalGb - telemetry.ramUsedGb).coerceAtLeast(0f)
+                val ramUnit = if (telemetry.ramTotalGb > 0f) {
+                    "${String.format(java.util.Locale.US, "%.1f", telemetry.ramUsedGb)} / ${String.format(java.util.Locale.US, "%.0f", telemetry.ramTotalGb)} GB"
+                } else {
+                    "-- / -- GB"
+                }
+                val ramSubtitle = if (telemetry.ramTotalGb > 0f) {
+                    HermesStrings.memoryFree(language, freeGb)
+                } else {
+                    if (language == AppLanguage.AR) "بانتظار قراءة الذاكرة" else "Awaiting telemetry"
+                }
                 SystemMetricCircularCard(
                     title = HermesStrings.memoryTitle(language),
                     currentValue = ramPercent,
                     maxValue = 100f,
-                    unit = "${String.format("%.1f", telemetry.ramUsedGb)} / ${String.format("%.0f", telemetry.ramTotalGb)} GB",
-                    subtitle = HermesStrings.memoryFree(language, freeGb),
+                    unit = ramUnit,
+                    subtitle = ramSubtitle,
                     accentColor = NeonCyan,
                     modifier = Modifier.weight(1f)
                 )
@@ -327,9 +339,25 @@ fun GpuAccelerationCard(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        HostSpecRow(label = HermesStrings.gpuDeviceLabel(language), value = "NVIDIA GeForce RTX 4090")
-        HostSpecRow(label = HermesStrings.vramLabel(language), value = "${String.format("%.1f", telemetry.vramUsedGb)} / ${String.format("%.1f", telemetry.vramTotalGb)} GB (GDDR6X)")
-        HostSpecRow(label = HermesStrings.inferenceEngineLabel(language), value = "Ollama / PyTorch CUDA 12.4")
+        val gpuDevice = if (telemetry.gpuUsage > 0f || telemetry.vramTotalGb > 0f) {
+            "Host GPU Acceleration"
+        } else {
+            if (language == AppLanguage.AR) "غير متوفر / مدمج" else "Integrated / Not Reported"
+        }
+        val vramValue = if (telemetry.vramTotalGb > 0f) {
+            "${String.format(java.util.Locale.US, "%.1f", telemetry.vramUsedGb)} / ${String.format(java.util.Locale.US, "%.1f", telemetry.vramTotalGb)} GB"
+        } else {
+            if (language == AppLanguage.AR) "غير متوفر" else "N/A"
+        }
+        val engineValue = if (telemetry.agentVersion.isNotBlank()) {
+            "Hermes Agent (${telemetry.agentVersion})"
+        } else {
+            "Hermes Official Gateway"
+        }
+
+        HostSpecRow(label = HermesStrings.gpuDeviceLabel(language), value = gpuDevice)
+        HostSpecRow(label = HermesStrings.vramLabel(language), value = vramValue)
+        HostSpecRow(label = HermesStrings.inferenceEngineLabel(language), value = engineValue)
     }
 }
 

@@ -42,6 +42,8 @@ class HermesPreferencesRepository(context: Context) {
         // Saved named profiles: "profile_<name>" -> JSON of ConnectionConfig
         private const val KEY_PROFILES = "pref_saved_profiles"
         private const val KEY_ACTIVE_PROFILE = "pref_active_profile"
+        private const val KEY_PINNED_SESSIONS = "pref_pinned_sessions"
+        private const val KEY_GLOBAL_AUTO_APPROVE = "pref_global_auto_approve"
     }
 
     fun getAppLanguage(): AppLanguage {
@@ -144,5 +146,23 @@ class HermesPreferencesRepository(context: Context) {
 
     fun saveSelectedModelId(modelId: String) {
         prefs.edit().putString(KEY_MODEL, modelId).apply()
+    }
+
+    fun getPinnedSessionIds(): Set<String> {
+        val raw = prefs.getString(KEY_PINNED_SESSIONS, "") ?: ""
+        if (raw.isBlank()) return emptySet()
+        return raw.split(",").filter { it.isNotBlank() }.toSet()
+    }
+
+    fun savePinnedSessionIds(ids: Set<String>) {
+        prefs.edit().putString(KEY_PINNED_SESSIONS, ids.joinToString(",")).apply()
+    }
+
+    fun getGlobalAutoApprove(): Boolean {
+        return prefs.getBoolean(KEY_GLOBAL_AUTO_APPROVE, false)
+    }
+
+    fun saveGlobalAutoApprove(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_GLOBAL_AUTO_APPROVE, enabled).apply()
     }
 }

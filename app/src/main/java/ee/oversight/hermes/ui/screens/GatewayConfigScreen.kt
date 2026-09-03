@@ -62,7 +62,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -619,7 +622,20 @@ fun GatewayConfigScreen(
                         style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonViolet)
                     )
                 }
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val clipboardManager = LocalClipboardManager.current
+                    val ctx = LocalContext.current
+                    // Copy all button
+                    IconButton(
+                        onClick = {
+                            val allLogsText = logs.reversed().joinToString("\n") { HermesAppLog.formatEntry(it) }
+                            clipboardManager.setText(AnnotatedString(allLogsText))
+                            Toast.makeText(ctx, if (language == AppLanguage.AR) "تم نسخ كافة السجلات" else "All logs copied", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy all logs", tint = NeonCyan, modifier = Modifier.size(14.dp))
+                    }
                     // Refresh button
                     IconButton(onClick = onRefreshLogs, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextSecondary, modifier = Modifier.size(14.dp))
@@ -632,7 +648,7 @@ fun GatewayConfigScreen(
             }
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Log list (monospace, scrollable, capped height)
+            // Log list (monospace, scrollable, selectable, capped height)
             if (logs.isEmpty()) {
                 Text(
                     text = if (language == AppLanguage.AR) "لا توجد سجلات بعد." else "No logs yet.",
@@ -640,27 +656,30 @@ fun GatewayConfigScreen(
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 200.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF0A0E14))
-                        .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(8.dp))
-                        .padding(8.dp)
-                ) {
-                    // Show most recent first (reversed)
-                    logs.reversed().forEach { entry ->
-                        val color = when (entry.level) {
-                            "ERROR" -> NeonRed
-                            "WARN" -> Color(0xFFF59E0B)
-                            else -> TextSecondary
+                SelectionContainer {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF0A0E14))
+                            .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                            .verticalScroll(rememberScrollState())
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        // Show most recent first (reversed)
+                        logs.reversed().forEach { entry ->
+                            val color = when (entry.level) {
+                                "ERROR" -> NeonRed
+                                "WARN" -> Color(0xFFF59E0B)
+                                else -> TextSecondary
+                            }
+                            Text(
+                                text = HermesAppLog.formatEntry(entry),
+                                style = MonospaceStyle.copy(fontSize = 9.5.sp, color = color, lineHeight = 13.sp)
+                            )
                         }
-                        Text(
-                            text = HermesAppLog.formatEntry(entry),
-                            style = MonospaceStyle.copy(fontSize = 9.sp, color = color, lineHeight = 12.sp),
-                            maxLines = 3
-                        )
                     }
                 }
             }
