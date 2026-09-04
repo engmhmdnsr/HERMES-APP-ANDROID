@@ -91,6 +91,14 @@ enum class SessionTabFilter {
     ARCHIVED
 }
 
+enum class SessionSourceFilter {
+    ALL_SOURCES,
+    DESKTOP,
+    API_SERVER,
+    TELEGRAM,
+    MOBILE
+}
+
 enum class SessionSortOrder {
     NEWEST_FIRST,
     OLDEST_FIRST,
@@ -118,6 +126,7 @@ fun SessionsDrawerContent(
     val clipboardManager = LocalClipboardManager.current
 
     var selectedFilter by remember { mutableStateOf(SessionTabFilter.ALL) }
+    var sourceFilter by remember { mutableStateOf(SessionSourceFilter.ALL_SOURCES) }
     var sortOrder by remember { mutableStateOf(SessionSortOrder.NEWEST_FIRST) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearchVisible by remember { mutableStateOf(false) }
@@ -128,12 +137,27 @@ fun SessionsDrawerContent(
     val dateFormat = remember { SimpleDateFormat("MMM d", Locale.ENGLISH) }
 
     // Filter & sort logic
-    val displaySessions = remember(sessions, selectedFilter, sortOrder, searchQuery, pinnedSessionIds) {
+    val displaySessions = remember(sessions, selectedFilter, sourceFilter, sortOrder, searchQuery, pinnedSessionIds) {
         var list = when (selectedFilter) {
             SessionTabFilter.ALL -> sessions.filter { !it.isArchived }
             SessionTabFilter.THREADS -> sessions.filter { it.isThread }
             SessionTabFilter.PINNED -> sessions.filter { pinnedSessionIds.contains(it.id) || it.isPinned }
             SessionTabFilter.ARCHIVED -> sessions.filter { it.isArchived }
+        }
+
+        // Source filter (Telegram / other gateways / desktop / mobile)
+        list = when (sourceFilter) {
+            SessionSourceFilter.ALL_SOURCES -> list
+            SessionSourceFilter.DESKTOP -> list.filter { it.source.equals("desktop", true) }
+            SessionSourceFilter.API_SERVER -> list.filter {
+                it.source.equals("api_server", true) || it.source.equals("api", true)
+            }
+            SessionSourceFilter.TELEGRAM -> list.filter {
+                it.source.contains("telegram", ignoreCase = true)
+            }
+            SessionSourceFilter.MOBILE -> list.filter {
+                it.source.equals("mobile_app", true) || it.source.equals("mobile", true) || it.source.equals("android", true)
+            }
         }
 
         if (searchQuery.isNotBlank()) {
@@ -147,7 +171,7 @@ fun SessionsDrawerContent(
         when (sortOrder) {
             SessionSortOrder.NEWEST_FIRST -> list.sortedWith(
                 compareByDescending<HermesSession> { pinnedSessionIds.contains(it.id) || it.isPinned }
-                    .thenByDescending { it.startedAt }
+                    .thenByDescending { it.lastActiveAt.takeIf { t -> t > 0 } ?: it.startedAt }
             )
             SessionSortOrder.OLDEST_FIRST -> list.sortedWith(
                 compareByDescending<HermesSession> { pinnedSessionIds.contains(it.id) || it.isPinned }
@@ -466,6 +490,46 @@ fun SessionsDrawerContent(
             }
         }
 
+        // Source filter chips (Telegram / Desktop / API / Mobile)
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val sourceChips = listOf(
+                SessionSourceFilter.ALL_SOURCES to (if (language == AppLanguage.AR) "كل المصادر" else "All sources"),
+                SessionSourceFilter.TELEGRAM to "Telegram",
+                SessionSourceFilter.DESKTOP to "Desktop",
+                SessionSourceFilter.API_SERVER to "API",
+                SessionSourceFilter.MOBILE to (if (language == AppLanguage.AR) "الموبايل" else "Mobile")
+            )
+            items(sourceChips) { (filter, label) ->
+                val isSelected = sourceFilter == filter
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (isSelected) Color(0xFF1A2E4A) else Color(0xFF10131E))
+                        .border(
+                            1.dp,
+                            if (isSelected) Color(0xFF3B6AA8) else Color(0xFF1B2234),
+                            RoundedCornerShape(14.dp)
+                        )
+                        .clickable { sourceFilter = filter }
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        style = MonospaceStyle.copy(
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) Color(0xFF9CC8FF) else Color(0xFF7E8EA4)
+                        )
+                    )
+                }
+            }
+        }
+
         // "Customize sessions" Action Row
         Row(
             modifier = Modifier
@@ -540,17 +604,24 @@ fun SessionsDrawerContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            // Title
-                            Text(
-                                text = s.title,
-                                style = MonospaceStyle.copy(
-                                    fontSize = 14.sp,
-                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (isCurrent) Color.White else Color(0xFFE2E8F0)
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            // Title + Source badge
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = s.title,
+                                    style = MonospaceStyle.copy(
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (isCurrent) Color.White else Color(0xFFE2E8F0)
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (s.source.isNotBlank()) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    SourceBadge(source = s.source)
+                                }
+                            }
 
                             Spacer(modifier = Modifier.height(3.dp))
 
@@ -850,5 +921,37 @@ fun SessionsDrawerContent(
                 }
             )
         }
+    }
+}
+
+/**
+ * Small colored badge showing which gateway/platform a session belongs to
+ * (desktop app, Telegram bot, API clients, mobile, etc).
+ */
+@Composable
+fun SourceBadge(source: String) {
+    val (label, bg, fg) = when {
+        source.equals("desktop", true) -> Triple("desktop", Color(0xFF1A2E4A), Color(0xFF7DB4FF))
+        source.equals("api_server", true) || source.equals("api", true) -> Triple("api", Color(0xFF2A1E4A), Color(0xFFC0A0FF))
+        source.contains("telegram", ignoreCase = true) -> Triple("telegram", Color(0xFF0E3A4A), Color(0xFF5FD0F0))
+        source.contains("discord", ignoreCase = true) -> Triple("discord", Color(0xFF2E2A4A), Color(0xFF9B8CFF))
+        source.equals("mobile_app", true) || source.equals("mobile", true) || source.equals("android", true) -> Triple("mobile", Color(0xFF0F3A2E), Color(0xFF5FF0A8))
+        source.equals("whatsapp", true) || source.contains("wa_", true) -> Triple("whatsapp", Color(0xFF1E3A1E), Color(0xFF7FE08A))
+        else -> Triple(source.take(10), Color(0xFF232837), Color(0xFF9AA7B8))
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(bg)
+            .padding(horizontal = 5.dp, vertical = 1.dp)
+    ) {
+        Text(
+            text = label,
+            style = MonospaceStyle.copy(
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = fg
+            )
+        )
     }
 }

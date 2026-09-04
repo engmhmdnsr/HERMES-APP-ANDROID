@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -139,6 +140,7 @@ fun GatewayConfigScreen(
     var profileNameInput by remember { mutableStateOf("") }
     var isKeyVisible by remember { mutableStateOf(false) }
     var apiKeyCopied by remember { mutableStateOf(false) }
+    var showHelpDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -440,6 +442,43 @@ fun GatewayConfigScreen(
                         }
                     }
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ===== Connection help / tutorial (opens a popup dialog) =====
+        SectionCard(borderColor = NeonViolet.copy(alpha = 0.35f)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { showHelpDialog = true }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NeonViolet.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.School, null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (language == AppLanguage.AR) "شرح التوصيل والخطوات" else "HOW TO CONNECT",
+                        style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonVioletLight)
+                    )
+                    Text(
+                        text = if (language == AppLanguage.AR) "خطوات التوصيل وجلب مفتاح Hermes API" else "Step-by-step setup + how to get the Hermes API key",
+                        style = MonospaceStyle.copy(fontSize = 9.5.sp, color = TextSecondary),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Icon(Icons.Default.ChevronRight, null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
             }
         }
 
@@ -815,6 +854,154 @@ fun GatewayConfigScreen(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+
+    // ===== How-to-connect popup dialog =====
+    if (showHelpDialog) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showHelpDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(CyberSurface)
+                    .border(1.dp, NeonViolet.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                    .padding(18.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    // Title
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.School, null, tint = NeonVioletLight, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (language == AppLanguage.AR) "شرح التوصيل" else "HOW TO CONNECT",
+                            style = MonospaceStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = NeonVioletLight)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Step blocks
+                    HelpStep(
+                        number = "1",
+                        title = if (language == AppLanguage.AR) "ثبّت Hermes على جهازك" else "Install Hermes on your PC",
+                        body = if (language == AppLanguage.AR)
+                            "نزّل Hermes Agent على الكمبيوتر اللي هيكون عليه الـ Gateway (Windows أو Linux)."
+                        else
+                            "Install Hermes Agent on the computer that will run the Gateway (Windows or Linux)."
+                    )
+                    HelpStep(
+                        number = "2",
+                        title = if (language == AppLanguage.AR) "شغّل الـ API Server" else "Enable the API Server",
+                        body = if (language == AppLanguage.AR)
+                            "افتح ملف .env في مجلد Hermes وضع:\nAPI_SERVER_ENABLED=true\nAPI_SERVER_PORT=8080\nوبعدين أعد تشغيل Hermes."
+                        else
+                            "Open the .env file inside the Hermes folder and set:\nAPI_SERVER_ENABLED=true\nAPI_SERVER_PORT=8080\nThen restart Hermes."
+                    )
+                    HelpStep(
+                        number = "3",
+                        title = if (language == AppLanguage.AR) "خد الـ API Key" else "Get the API Key",
+                        body = if (language == AppLanguage.AR)
+                            "نفس ملف .env فيه سطر API_SERVER_KEY=. انسخ القيمة اللي بعده (الـ key كامل من أول حرف لآخر حرف) والصقها هنا في خانة المفتاح."
+                        else
+                            "In the same .env file, find the line API_SERVER_KEY=. Copy the whole value after it (the full key, first to last char) and paste it into the key field."
+                    )
+                    HelpStep(
+                        number = "4",
+                        title = if (language == AppLanguage.AR) "اكتب العنوان والبورت" else "Enter address & port",
+                        body = if (language == AppLanguage.AR)
+                            "اكتب الـ Tailscale IP بتاع الجهاز (مثل 100.x.x.x) والبورت 8080 في الحقول فوق. لو على نفس شبكة WiFi من غير Tailscale، اكتب IP الشبكة المحلية."
+                        else
+                            "Type the PC's Tailscale IP (like 100.x.x.x) and port 8080 in the fields above. On the same WiFi without Tailscale, use the local network IP instead."
+                    )
+                    HelpStep(
+                        number = "5",
+                        title = if (language == AppLanguage.AR) "دوس TEST PING" else "Press TEST PING",
+                        body = if (language == AppLanguage.AR)
+                            "دوس على زر Test Ping. لو ظهرت رسالة نجاح خضرا، دوس SAVE والاتصال هيتحفظ ويشتغل."
+                        else
+                            "Tap Test Ping. If you get a green success message, tap SAVE and the connection will be stored and used."
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = CyberSurfaceBorder)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Extra tip box (Tailscale)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NeonCyan.copy(alpha = 0.08f))
+                            .border(1.dp, NeonCyan.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = if (language == AppLanguage.AR) "💡 نصيحة: من غير Tailscale؟" else "💡 No Tailscale?",
+                            style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonCyan)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (language == AppLanguage.AR)
+                                "طالما الجهازين على نفس شبكة WiFi، اكتب IP الموبايل الشبكي بتاع الـ PC (زي 192.168.1.5) في خانة IP. الـ Tailscale مش شرط، بس مطلوب عشان توصل من أي مكان."
+                            else
+                                "As long as both devices are on the same WiFi, enter the PC's LAN IP (like 192.168.1.5) in the IP field. Tailscale is not required, but needed to connect from anywhere.",
+                            style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary, lineHeight = 14.sp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Close button
+                    Button(
+                        onClick = { showHelpDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonViolet),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                    ) {
+                        Text(
+                            text = if (language == AppLanguage.AR) "فهمت، تمام" else "GOT IT",
+                            style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HelpStep(number: String, title: String, body: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(NeonViolet.copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = number,
+                style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonVioletLight)
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            )
+            Text(
+                text = body,
+                style = MonospaceStyle.copy(fontSize = 10.5.sp, color = TextSecondary, lineHeight = 15.sp),
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
     }
 }
 

@@ -51,6 +51,9 @@ data class SystemTelemetry(
     val gpuUsage: Float = 0f,
     val vramUsedGb: Float = 0f,
     val vramTotalGb: Float = 0f,
+    val gpuName: String = "",
+    val diskUsedGb: Float = 0f,
+    val diskTotalGb: Float = 0f,
     val hostname: String = "WINDOWS-11-PC",
     val osVersion: String = "Windows 11",
     val uptime: String = "",
@@ -114,7 +117,9 @@ data class ChatMessage(
     val modelName: String? = null,
     val isStreaming: Boolean = false,
     val toolExecutions: List<ToolExecutionBlock> = emptyList(),
-    val attachments: List<String> = emptyList() // image data URLs (base64) attached to user msg
+    val attachments: List<String> = emptyList(), // image data URLs (base64) attached to user msg
+    val thinkingContent: String = "",           // hidden reasoning stream (dimmed, collapsible)
+    val thinkingDone: Boolean = false            // true once the real reply started
 )
 
 data class AiModelInfo(
@@ -168,7 +173,9 @@ data class HermesSession(
     val reasoningTokens: Long = 0L,
     val isPinned: Boolean = false,
     val isThread: Boolean = false,
-    val isArchived: Boolean = false
+    val isArchived: Boolean = false,
+    val source: String = "", // e.g. "desktop", "api_server", "telegram", "mobile_app"
+    val lastActiveAt: Long = 0L // bumped whenever the session sends/receives a message
 ) {
     val totalTokens: Long get() = inputTokens + outputTokens
     fun toTokenUsage(): TokenUsage = TokenUsage(

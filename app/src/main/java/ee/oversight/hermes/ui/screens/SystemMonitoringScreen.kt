@@ -258,6 +258,12 @@ fun Windows11HostCard(
         HostSpecRow(label = HermesStrings.hostnameLabel(language), value = telemetry.hostname)
         HostSpecRow(label = HermesStrings.osVersionLabel(language), value = telemetry.osVersion)
         HostSpecRow(label = HermesStrings.tailscaleNodeLabel(language), value = "$tailscaleIp (${HermesStrings.directPeer(language)})")
+        if (telemetry.diskTotalGb > 0f) {
+            HostSpecRow(
+                label = HermesStrings.diskLabel(language),
+                value = "${String.format(java.util.Locale.US, "%.1f", telemetry.diskUsedGb)} / ${String.format(java.util.Locale.US, "%.0f", telemetry.diskTotalGb)} GB"
+            )
+        }
         HostSpecRow(label = HermesStrings.uptimeLabel(language), value = telemetry.uptime)
         HostSpecRow(label = HermesStrings.hermesAgentLabel(language), value = telemetry.agentVersion)
         HostSpecRow(label = HermesStrings.activeTasksLabel(language), value = HermesStrings.backgroundProcesses(language, telemetry.activeTasksCount))
@@ -339,7 +345,9 @@ fun GpuAccelerationCard(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        val gpuDevice = if (telemetry.gpuUsage > 0f || telemetry.vramTotalGb > 0f) {
+        val gpuDevice = if (telemetry.gpuName.isNotBlank()) {
+            telemetry.gpuName
+        } else if (telemetry.gpuUsage > 0f || telemetry.vramTotalGb > 0f) {
             "Host GPU Acceleration"
         } else {
             if (language == AppLanguage.AR) "غير متوفر / مدمج" else "Integrated / Not Reported"

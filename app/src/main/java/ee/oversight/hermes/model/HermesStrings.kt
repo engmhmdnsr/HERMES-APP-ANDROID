@@ -159,6 +159,10 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.AR -> "مدة التشغيل:"
         AppLanguage.EN -> "Host Uptime:"
     }
+    fun diskLabel(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "مساحة التخزين:"
+        AppLanguage.EN -> "Disk Storage:"
+    }
     fun hermesAgentLabel(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "إصدار الوكيل:"
         AppLanguage.EN -> "Hermes Agent:"

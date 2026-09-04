@@ -77,6 +77,7 @@ fun MainScreen(
     val chatMessages by viewModel.chatMessages.collectAsState()
     val isStreaming by viewModel.isStreaming.collectAsState()
     val selectedModel by viewModel.selectedModel.collectAsState()
+    val reasoningEffort by viewModel.reasoningEffort.collectAsState()
     val activeTab by viewModel.activeTab.collectAsState()
     val pingResult by viewModel.pingResult.collectAsState()
     val isPinging by viewModel.isPinging.collectAsState()
@@ -93,6 +94,7 @@ fun MainScreen(
     val activeApprovalRequest by viewModel.activeApprovalRequest.collectAsState()
     val globalAutoApprove by viewModel.globalAutoApprove.collectAsState()
     val sessionAutoApproveIds by viewModel.sessionAutoApproveIds.collectAsState()
+    val queuedMessages by viewModel.queuedMessages.collectAsState()
     val isSessionAutoApproved = currentSessionId != null && sessionAutoApproveIds.contains(currentSessionId)
 
     val layoutDirection = if (language == AppLanguage.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
@@ -326,10 +328,15 @@ fun MainScreen(
                             onRefreshSessions = { viewModel.loadSessions() },
                             onSendMessage = { text, attachments -> viewModel.sendMessage(text, attachments) },
                             onStopStreaming = { viewModel.stopStreaming() },
+                            onQueueMessage = { text, attachments -> viewModel.sendQueuedMessage(text, attachments) },
+                            reasoningEffort = reasoningEffort,
+                            onEffortSelected = { viewModel.setReasoningEffort(it) },
                             activeApprovalRequest = activeApprovalRequest,
                             onResolveApproval = { req, approved, mode ->
                                 viewModel.resolveApproval(req, approved, mode)
-                            }
+                            },
+                            queuedMessageCount = queuedMessages.size,
+                            onCancelQueued = { viewModel.cancelQueued() }
                         )
                     }
                     AppTab.TERMINAL -> {

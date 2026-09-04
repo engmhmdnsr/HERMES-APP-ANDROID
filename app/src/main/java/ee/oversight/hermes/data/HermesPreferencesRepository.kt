@@ -38,6 +38,7 @@ class HermesPreferencesRepository(context: Context) {
         private const val KEY_GATEWAY_URL = "pref_gateway_url"
         private const val KEY_USE_CUSTOM_URL = "pref_use_custom_url"
         private const val KEY_MODEL = "pref_selected_model"
+        private const val KEY_REASONING_EFFORT = "pref_reasoning_effort"
         private const val KEY_LANGUAGE = "pref_app_language"
         // Saved named profiles: "profile_<name>" -> JSON of ConnectionConfig
         private const val KEY_PROFILES = "pref_saved_profiles"
@@ -146,6 +147,14 @@ class HermesPreferencesRepository(context: Context) {
 
     fun saveSelectedModelId(modelId: String) {
         prefs.edit().putString(KEY_MODEL, modelId).apply()
+    }
+
+    fun getReasoningEffort(): String {
+        return prefs.getString(KEY_REASONING_EFFORT, "medium") ?: "medium"
+    }
+
+    fun saveReasoningEffort(effort: String) {
+        prefs.edit().putString(KEY_REASONING_EFFORT, effort).apply()
     }
 
     fun getPinnedSessionIds(): Set<String> {

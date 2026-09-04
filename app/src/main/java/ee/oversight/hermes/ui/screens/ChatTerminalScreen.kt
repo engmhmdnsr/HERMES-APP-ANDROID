@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
@@ -61,6 +63,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -151,8 +155,13 @@ fun ChatTerminalScreen(
     onRefreshSessions: () -> Unit,
     onSendMessage: (String, List<String>) -> Unit,
     onStopStreaming: () -> Unit,
+    onQueueMessage: ((String, List<String>) -> Unit)? = null,
+    reasoningEffort: String = "medium",
+    onEffortSelected: ((String) -> Unit)? = null,
     activeApprovalRequest: ApprovalRequest? = null,
     onResolveApproval: ((ApprovalRequest, Boolean, ApprovalMode) -> Unit)? = null,
+    queuedMessageCount: Int = 0,
+    onCancelQueued: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var promptInput by remember { mutableStateOf("") }
@@ -403,6 +412,40 @@ fun ChatTerminalScreen(
             }
         }
 
+        // Queued-messages indicator (shown while a run is active and messages wait)
+        if (queuedMessageCount > 0) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 2.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(NeonAmber.copy(alpha = 0.12f))
+                    .border(1.dp, NeonAmber.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (language == AppLanguage.AR)
+                        "⏳ $queuedMessageCount رسالة في الانتظار... هتتبعت أول ما الرد يخلص"
+                    else
+                        "⏳ $queuedMessageCount queued — will send when the current reply finishes",
+                    style = MonospaceStyle.copy(fontSize = 10.5.sp, color = NeonAmber),
+                    maxLines = 2
+                )
+                if (onCancelQueued != null) {
+                    IconButton(onClick = onCancelQueued, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = if (language == AppLanguage.AR) "إلغاء الانتظار" else "Cancel queued",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         // Bottom Input Bar matching reference image (pill container with model selector inside)
         ChatInputBar(
             text = promptInput,
@@ -412,6 +455,8 @@ fun ChatTerminalScreen(
             onTextChange = { promptInput = it },
             isStreaming = isStreaming,
             hasAttachments = pendingImages.isNotEmpty() || pendingFiles.isNotEmpty() || isUploading,
+            reasoningEffort = reasoningEffort,
+            onEffortSelected = onEffortSelected,
             onAttachClick = { showAttachSheet = true },
             onVoiceInput = {
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -454,6 +499,26 @@ fun ChatTerminalScreen(
             onStop = {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onStopStreaming()
+            },
+            onQueue = {
+                if (promptInput.isNotBlank() || pendingImages.isNotEmpty() || pendingFiles.isNotEmpty()) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    var finalPrompt = promptInput
+                    if (pendingFiles.isNotEmpty()) {
+                        val fileNote = pendingFiles.joinToString("\n") { (path, name) ->
+                            "[File: $name] Saved at: $path"
+                        }
+                        finalPrompt = if (finalPrompt.isNotBlank()) {
+                            "$finalPrompt\n\n$fileNote"
+                        } else {
+                            fileNote
+                        }
+                    }
+                    onQueueMessage?.invoke(finalPrompt, pendingImages)
+                    promptInput = ""
+                    pendingImages = emptyList()
+                    pendingFiles = emptyList()
+                }
             },
             modifier = Modifier.imePadding()
         )
@@ -930,6 +995,16 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                     .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp))
                     .padding(14.dp)
             ) {
+                // Thinking / Reasoning section (dimmed, collapses when the real reply starts)
+                if (message.thinkingContent.isNotBlank() && message.sender == MessageSender.HERMES) {
+                    ThinkingBlock(
+                        thinking = message.thinkingContent,
+                        thinkingDone = message.thinkingDone,
+                        isStreaming = message.isStreaming,
+                        language = language
+                    )
+                }
+
                 // Tool Execution Blocks (Monospace Tool Windows)
                 if (message.toolExecutions.isNotEmpty()) {
                     Column(
@@ -980,6 +1055,94 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                             style = MonospaceStyle.copy(
                                 fontSize = 12.sp,
                                 color = TextSecondary
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ThinkingBlock(
+    thinking: String,
+    thinkingDone: Boolean,
+    isStreaming: Boolean,
+    language: AppLanguage
+) {
+    var expanded by remember { mutableStateOf(false) }
+    // Live (still thinking) → show Arabic "جاري التفكير"; done → compact "thinking"
+    val liveLabel = if (language == AppLanguage.AR) "جاري التفكير" else "thinking"
+    val doneLabel = "thinking"
+
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        // Dimmed live text while still thinking (font ~50% of normal 13.5sp ≈ 7sp)
+        if (!thinkingDone && thinking.isNotBlank()) {
+            SelectionContainer {
+                Text(
+                    text = thinking,
+                    style = MonospaceStyle.copy(
+                        fontSize = 7.sp,
+                        color = TextSecondary.copy(alpha = 0.55f),
+                        lineHeight = 10.sp
+                    )
+                )
+            }
+        }
+
+        // Collapsible toggle row shown once the reply started (or always after done)
+        if (thinkingDone || thinking.isNotBlank()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 4.dp, horizontal = 2.dp)
+                    .testTag("thinking_toggle")
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = if (thinkingDone) doneLabel else liveLabel,
+                    style = MonospaceStyle.copy(
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (thinkingDone) TextSecondary else NeonVioletLight
+                    )
+                )
+                if (!thinkingDone && isStreaming) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    CircularProgressIndicator(
+                        strokeWidth = 1.5.dp,
+                        color = NeonVioletLight,
+                        modifier = Modifier.size(10.dp)
+                    )
+                }
+            }
+
+            if (expanded && thinking.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF0C1118))
+                        .border(1.dp, Color(0xFF1A2130), RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = thinking,
+                            style = MonospaceStyle.copy(
+                                fontSize = 9.5.sp,
+                                color = TextSecondary.copy(alpha = 0.8f),
+                                lineHeight = 13.sp
                             )
                         )
                     }
@@ -1044,6 +1207,9 @@ fun ChatInputBar(
     onVoiceInput: (() -> Unit)? = null,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    onQueue: (() -> Unit)? = null,
+    reasoningEffort: String = "medium",
+    onEffortSelected: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -1147,6 +1313,81 @@ fun ChatInputBar(
                         modifier = Modifier.size(14.dp)
                     )
                 }
+
+                // Reasoning Effort Selector Pill [ effort ▾ ] — next to the model
+                if (onEffortSelected != null && !isStreaming) {
+                    var effortMenuOpen by remember { mutableStateOf(false) }
+                    val effortLabel = when (reasoningEffort) {
+                        "low" -> if (language == AppLanguage.AR) "منخفض" else "LOW"
+                        "medium" -> if (language == AppLanguage.AR) "متوسط" else "MED"
+                        "high" -> if (language == AppLanguage.AR) "مرتفع" else "HIGH"
+                        "none" -> if (language == AppLanguage.AR) "بدون" else "OFF"
+                        else -> "MED"
+                    }
+                    Box {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(NeonViolet.copy(alpha = 0.12f))
+                                .border(1.dp, NeonViolet.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                                .clickable { effortMenuOpen = true }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                                .testTag("effort_pill"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Reasoning effort",
+                                tint = NeonVioletLight,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = effortLabel,
+                                style = MonospaceStyle.copy(
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonVioletLight
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = NeonVioletLight.copy(alpha = 0.7f),
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = effortMenuOpen,
+                            onDismissRequest = { effortMenuOpen = false },
+                            containerColor = Color(0xFF131826)
+                        ) {
+                            listOf("low", "medium", "high", "none").forEach { level ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = when (level) {
+                                                "low" -> if (language == AppLanguage.AR) "⚡ منخفض (Low)" else "⚡ Low"
+                                                "medium" -> if (language == AppLanguage.AR) "🔶 متوسط (Medium)" else "🔶 Medium"
+                                                "high" -> if (language == AppLanguage.AR) "🔥 مرتفع (High)" else "🔥 High"
+                                                else -> if (language == AppLanguage.AR) "⛔ بدون تفكير (None)" else "⛔ None"
+                                            },
+                                            style = MonospaceStyle.copy(
+                                                fontSize = 13.sp,
+                                                color = if (level == reasoningEffort) NeonVioletLight else TextPrimary
+                                            )
+                                        )
+                                    },
+                                    onClick = {
+                                        effortMenuOpen = false
+                                        onEffortSelected(level)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // Right Action Group: [Mic] [Send / Stop]
@@ -1176,23 +1417,65 @@ fun ChatInputBar(
                 }
 
                 if (isStreaming) {
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(NeonRed.copy(alpha = 0.2f))
-                        .border(1.dp, NeonRed, CircleShape)
-                        .clickable { onStop() }
-                        .testTag("stop_stream_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Stop,
-                        contentDescription = HermesStrings.stopStreaming(language),
-                        tint = NeonRed,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+                    // Streaming: offer Queue (schedule for after this reply),
+                    // Send-now (interrupt + send) and Stop (just cancel).
+                    val canSend = text.isNotBlank() || hasAttachments
+                    if (canSend && onQueue != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(NeonAmber.copy(alpha = 0.15f))
+                                .border(1.dp, NeonAmber.copy(alpha = 0.6f), CircleShape)
+                                .clickable { onQueue() }
+                                .testTag("queue_button"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (language == AppLanguage.AR) "أضف للقائمة (يُرسل بعد الرد)" else "Queue (send after reply)",
+                                tint = NeonAmber,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    if (canSend) {
+                        // Send now = interrupt current reply and send immediately
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(NeonViolet.copy(alpha = 0.85f))
+                                .border(1.dp, NeonVioletLight, CircleShape)
+                                .clickable { onSend() }
+                                .testTag("send_interrupt_button"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = if (language == AppLanguage.AR) "إرسال الآن (يوقف الرد الحالي)" else "Send now (interrupt)",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(NeonRed.copy(alpha = 0.2f))
+                            .border(1.dp, NeonRed, CircleShape)
+                            .clickable { onStop() }
+                            .testTag("stop_stream_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = HermesStrings.stopStreaming(language),
+                            tint = NeonRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
             } else {
                 val canSend = text.isNotBlank() || hasAttachments
                 Box(

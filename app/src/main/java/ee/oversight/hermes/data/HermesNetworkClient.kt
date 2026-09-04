@@ -35,6 +35,8 @@ data class PingResult(
 
 sealed class StreamChunk {
     data class TextDelta(val text: String) : StreamChunk()
+    data class ThinkingDelta(val text: String) : StreamChunk()
+    data object ThinkingDone : StreamChunk()
     data class ToolStart(val tool: ToolExecutionBlock) : StreamChunk()
     data class ToolOutput(val toolId: String, val output: String, val status: ToolStatus) : StreamChunk()
     data class ApprovalNeeded(val request: ee.oversight.hermes.model.ApprovalRequest) : StreamChunk()
@@ -232,14 +234,17 @@ class HermesNetworkClient {
                 }
 
                 val telemetry = SystemTelemetry(
-                    cpuUsage = json.optDouble("cpu_usage", 0.0).toFloat(),
-                    ramUsedGb = json.optDouble("ram_used_gb", 0.0).toFloat(),
-                    ramTotalGb = json.optDouble("ram_total_gb", 0.0).toFloat(),
-                    gpuUsage = json.optDouble("gpu_usage", 0.0).toFloat(),
-                    vramUsedGb = json.optDouble("vram_used_gb", 0.0).toFloat(),
-                    vramTotalGb = json.optDouble("vram_total_gb", 0.0).toFloat(),
-                    hostname = json.optString("hostname", "WINDOWS-PC"),
-                    osVersion = json.optString("os_version", "Windows"),
+                    cpuUsage = json.optJSONObject("cpu")?.optDouble("percent", 0.0)?.toFloat() ?: json.optDouble("cpu_usage", 0.0).toFloat(),
+                    ramUsedGb = json.optJSONObject("memory")?.optDouble("used_gb", 0.0)?.toFloat() ?: json.optDouble("ram_used_gb", 0.0).toFloat(),
+                    ramTotalGb = json.optJSONObject("memory")?.optDouble("total_gb", 0.0)?.toFloat() ?: json.optDouble("ram_total_gb", 0.0).toFloat(),
+                    gpuUsage = json.optJSONObject("gpu")?.optDouble("utilization", 0.0)?.toFloat() ?: json.optDouble("gpu_usage", 0.0).toFloat(),
+                    vramUsedGb = json.optJSONObject("gpu")?.optDouble("memory_used_gb", 0.0)?.toFloat() ?: json.optDouble("vram_used_gb", 0.0).toFloat(),
+                    vramTotalGb = json.optJSONObject("gpu")?.optDouble("memory_total_gb", 0.0)?.toFloat() ?: json.optDouble("vram_total_gb", 0.0).toFloat(),
+                    gpuName = json.optJSONObject("gpu")?.optString("name", "") ?: "",
+                    diskUsedGb = json.optJSONObject("disk")?.optDouble("used_gb", 0.0)?.toFloat() ?: 0f,
+                    diskTotalGb = json.optJSONObject("disk")?.optDouble("total_gb", 0.0)?.toFloat() ?: 0f,
+                    hostname = json.optJSONObject("host")?.optString("hostname", "WINDOWS-PC") ?: json.optString("hostname", "WINDOWS-PC"),
+                    osVersion = json.optJSONObject("host")?.optString("os", "Windows") ?: json.optString("os_version", "Windows"),
                     uptime = json.optString("uptime", ""),
                     agentVersion = json.optString("agent_version", ""),
                     activeTasksCount = json.optInt("active_tasks_count", 0),
@@ -274,7 +279,7 @@ class HermesNetworkClient {
                 list.add(
                     HermesSession(
                         id = obj.getString("id"),
-                        title = obj.optString("title").ifBlank { obj.getString("id") },
+                        title = cleanSessionTitle(obj.optString("title")),
                         model = obj.optString("model", "default"),
                         startedAt = (obj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
                         messageCount = obj.optInt("message_count", 0),
@@ -283,7 +288,9 @@ class HermesNetworkClient {
                         reasoningTokens = obj.optLong("reasoning_tokens", 0L),
                         isPinned = obj.optBoolean("pinned", false) || obj.optBoolean("is_pinned", false),
                         isThread = obj.optBoolean("is_thread", false) || obj.optString("type") == "thread",
-                        isArchived = obj.optBoolean("archived", false) || obj.optBoolean("is_archived", false)
+                        isArchived = obj.optBoolean("archived", false) || obj.optBoolean("is_archived", false),
+                        source = obj.optString("source", ""),
+                        lastActiveAt = (obj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
                     )
                 )
             }
@@ -399,10 +406,12 @@ class HermesNetworkClient {
             val sessionObj = json.optJSONObject("session") ?: json
             val session = HermesSession(
                 id = sessionObj.getString("id"),
-                title = sessionObj.optString("title").ifBlank { "New Session" },
+                title = cleanSessionTitle(sessionObj.optString("title")),
                 model = sessionObj.optString("model", model ?: "default"),
                 startedAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
-                messageCount = sessionObj.optInt("message_count", 0)
+                messageCount = sessionObj.optInt("message_count", 0),
+                source = sessionObj.optString("source", "mobile_app"),
+                lastActiveAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
             )
             Result.success(session)
         } catch (e: Exception) {
@@ -504,7 +513,8 @@ class HermesNetworkClient {
         prompt: String,
         model: String,
         sessionId: String? = null,
-        attachments: List<String> = emptyList()
+        attachments: List<String> = emptyList(),
+        reasoningEffort: String = ""
     ): Flow<StreamChunk> = flow {
         // If no session id, create one first
         val resolvedSessionId = sessionId
@@ -535,6 +545,11 @@ class HermesNetworkClient {
             put("message", messagePayload)
             if (model.isNotBlank() && model != "default") {
                 put("model", model)
+            }
+            // Reasoning effort (low/medium/high/none) — server maps it onto the
+            // agent's reasoning_effort when the model supports it.
+            if (reasoningEffort.isNotBlank() && reasoningEffort != "none") {
+                put("model_options", JSONObject().put("reasoning_effort", reasoningEffort))
             }
         }
         val body = payload.toString().toRequestBody("application/json".toMediaType())
@@ -610,17 +625,26 @@ class HermesNetworkClient {
                                     ))
                                 }
                                 eventName == "tool.progress" -> {
-                                    val toolId = json.optString("message_id", System.currentTimeMillis().toString())
                                     val toolName = json.optString("tool_name", "_thinking")
-                                    val preview = json.optString("preview", "") ?: json.optString("delta", "")
-                                    emit(StreamChunk.ToolStart(
-                                        ToolExecutionBlock(
-                                            id = toolId,
-                                            toolName = toolName,
-                                            command = preview.take(200),
-                                            status = ToolStatus.RUNNING
-                                        )
-                                    ))
+                                    if (toolName == "_thinking" || toolName == "thinking") {
+                                        // Hidden reasoning stream → ThinkingDelta so the
+                                        // UI can render it dimmed + collapsible.
+                                        val delta = json.optString("delta", json.optString("preview", ""))
+                                        if (delta.isNotEmpty()) {
+                                            emit(StreamChunk.ThinkingDelta(delta))
+                                        }
+                                    } else {
+                                        val toolId = json.optString("message_id", System.currentTimeMillis().toString())
+                                        val preview = json.optString("preview", "") ?: json.optString("delta", "")
+                                        emit(StreamChunk.ToolStart(
+                                            ToolExecutionBlock(
+                                                id = toolId,
+                                                toolName = toolName,
+                                                command = preview.take(200),
+                                                status = ToolStatus.RUNNING
+                                            )
+                                        ))
+                                    }
                                 }
                                 eventName == "tool.completed" || eventName == "tool.failed" -> {
                                     val toolId = json.optString("message_id", "")
@@ -648,6 +672,8 @@ class HermesNetworkClient {
                                         sawContent = true
                                         emit(StreamChunk.TextDelta(content))
                                     }
+                                    // Reply phase is over → thinking is final, collapse it.
+                                    emit(StreamChunk.ThinkingDone)
                                 }
                                 eventName == "approval.request" || eventName == "approval_required" || json.optString("type") == "approval.request" -> {
                                     val runId = json.optString("run_id", json.optString("id", System.currentTimeMillis().toString()))
@@ -777,5 +803,16 @@ class HermesNetworkClient {
     companion object {
         // If running against the old custom gateway (port 8080, FastAPI) these
         // are the older paths. Kept for reference only.
+
+        /**
+         * The API returns JSON `null` for sessions without an explicit title.
+         * org.json's optString() then yields the literal string "null", which
+         * would otherwise be shown as the session name. Normalize it here.
+         */
+        fun cleanSessionTitle(raw: String): String {
+            val t = raw.trim()
+            if (t.isEmpty() || t.equals("null", ignoreCase = true)) return "New Session"
+            return t
+        }
     }
 }

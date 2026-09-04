@@ -179,30 +179,40 @@ fun CyberpunkTopBar(
                 }
             }
 
-            // Status pill
+            // Right side: token consumption (compact, next to the logo/title)
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .background(statusColor.copy(alpha = 0.12f))
-                    .border(1.dp, statusColor.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .background(if (totalTok > 0) NeonAmber.copy(alpha = 0.10f) else Color(0xFF0F141C))
+                    .border(
+                        1.dp,
+                        if (totalTok > 0) NeonAmber.copy(alpha = 0.35f) else Color(0xFF1A2130),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .clickable { showTokenDetail = true }
                     .padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(statusColor)
-                        .alpha(pulseAlpha)
+                Icon(
+                    imageVector = Icons.Default.Bolt,
+                    contentDescription = "Token Usage",
+                    tint = if (totalTok > 0) NeonAmber else TextSecondary,
+                    modifier = Modifier.size(12.dp)
                 )
                 Spacer(modifier = Modifier.width(5.dp))
                 Text(
-                    text = statusLabel,
-                    style = MonospaceStyle.copy(
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = statusColor
-                    )
+                    text = "⬆${TokenUsage.formatTokenCount(inTok)}",
+                    style = MonospaceStyle.copy(fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = NeonCyan)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "⬇${TokenUsage.formatTokenCount(outTok)}",
+                    style = MonospaceStyle.copy(fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = NeonVioletLight)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = TokenUsage.formatTokenCount(totalTok),
+                    style = MonospaceStyle.copy(fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = if (totalTok > 0) NeonAmber else TextSecondary)
                 )
             }
         }
@@ -252,39 +262,6 @@ fun CyberpunkTopBar(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Token Usage Badge (Clickable for breakdown)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (totalTok > 0) NeonAmber.copy(alpha = 0.15f) else Color(0xFF131823))
-                        .border(
-                            1.dp,
-                            if (totalTok > 0) NeonAmber.copy(alpha = 0.5f) else CyberSurfaceBorder,
-                            RoundedCornerShape(6.dp)
-                        )
-                        .clickable { showTokenDetail = true }
-                        .padding(horizontal = 7.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Bolt,
-                        contentDescription = "Token Usage",
-                        tint = if (totalTok > 0) NeonAmber else TextSecondary,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = if (totalTok > 0) "${TokenUsage.formatTokenCount(totalTok)} Tok" else "0 Tok",
-                        style = MonospaceStyle.copy(
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (totalTok > 0) NeonAmber else TextSecondary
-                        )
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
                 // Approval Mode Badge
                 val approvalBadgeText = when {
                     globalAutoApprove -> "⚡ AUTO-ALL"

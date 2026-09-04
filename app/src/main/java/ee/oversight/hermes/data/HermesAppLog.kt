@@ -1,14 +1,18 @@
 package ee.oversight.hermes.data
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Simple in-app event logger.
  * Stores the last [MAX_ENTRIES] log lines in memory so the user can view
  * what the app has been doing (connections, sends, errors) from About Us.
+ *
+ * Exposes a live [StateFlow] so any screen collecting [all] updates in real
+ * time as soon as a new entry is appended, with no manual refresh needed.
  */
 object HermesAppLog {
     const val MAX_ENTRIES = 200
@@ -19,23 +23,28 @@ object HermesAppLog {
         val message: String
     )
 
-    private val entries = CopyOnWriteArrayList<LogEntry>()
+    private val _entries = MutableStateFlow<List<LogEntry>>(emptyList())
+
+    /** Live snapshot of all buffered entries (newest appended at the end). */
+    val entries: StateFlow<List<LogEntry>> = _entries
 
     /** Thread-safe append with automatic size cap. */
     fun log(level: String, message: String) {
-        entries.add(LogEntry(level = level, message = message))
-        while (entries.size > MAX_ENTRIES) {
-            entries.removeAt(0)
-        }
+        val current = _entries.value
+        val updated = (current + LogEntry(level = level, message = message)).takeLast(MAX_ENTRIES)
+        _entries.value = updated
     }
 
     fun info(message: String) = log("INFO", message)
     fun warn(message: String) = log("WARN", message)
     fun error(message: String) = log("ERROR", message)
 
-    fun all(): List<LogEntry> = entries.toList()
+    /** Snapshot for one-shot reads (e.g. markdown export). */
+    fun all(): List<LogEntry> = _entries.value
 
-    fun clear() = entries.clear()
+    fun clear() {
+        _entries.value = emptyList()
+    }
 
     /** Render one entry as "HH:mm:ss [LEVEL] message". */
     fun formatEntry(e: LogEntry): String {

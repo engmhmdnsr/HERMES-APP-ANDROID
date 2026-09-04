@@ -60,10 +60,59 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _isStreaming = MutableStateFlow(false)
     val isStreaming: StateFlow<Boolean> = _isStreaming.asStateFlow()
 
+    /** Messages queued while a run is in progress — auto-send when it finishes. */
+    data class QueuedMessage(
+        val prompt: String,
+        val attachments: List<String> = emptyList(),
+        val sessionId: String? = null,
+        val queuedAt: Long = System.currentTimeMillis()
+    )
+
+    /** Transient: input captured while streaming, waiting for the user to pick Send-now vs Queue. */
+    data class QueuedInput(
+        val prompt: String,
+        val attachments: List<String> = emptyList()
+    )
+
+    private val _queuedMessages = MutableStateFlow<List<QueuedMessage>>(emptyList())
+    val queuedMessages: StateFlow<List<QueuedMessage>> = _queuedMessages.asStateFlow()
+    val queuedCount: Int get() = _queuedMessages.value.size
+
+    private val _pendingInput = MutableStateFlow<QueuedInput?>(null)
+    val pendingInput: StateFlow<QueuedInput?> = _pendingInput.asStateFlow()
+
+    fun clearPendingInput() { _pendingInput.value = null }
+
+    /** User pressed stop — cancel the run and optionally drop queued messages. */
+    fun cancelQueued() { _queuedMessages.value = emptyList() }
+
+    /** True when the device screen is on (used to avoid fake disconnects during screen-off). */
+    private fun isScreenInteractive(): Boolean {
+        return try {
+            val pm = getApplication<Application>().getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            pm.isInteractive
+        } catch (_: Exception) {
+            true
+        }
+    }
+
     private val _selectedModel = MutableStateFlow(
         AvailableAiModels.find { it.id == prefsRepo.getSelectedModelId() } ?: AvailableAiModels.first()
     )
     val selectedModel: StateFlow<AiModelInfo> = _selectedModel.asStateFlow()
+
+    // Reasoning effort for the current model: none/low/medium/high (server accepts
+    // values in {none, minimal, low, medium, high, xhigh, max, ultra}).
+    private val _reasoningEffort = MutableStateFlow(prefsRepo.getReasoningEffort())
+    val reasoningEffort: StateFlow<String> = _reasoningEffort.asStateFlow()
+
+    fun setReasoningEffort(effort: String) {
+        val valid = listOf("none", "low", "medium", "high")
+        val normalized = if (effort.lowercase() in valid) effort.lowercase() else "medium"
+        _reasoningEffort.value = normalized
+        prefsRepo.saveReasoningEffort(normalized)
+        HermesAppLog.info("Reasoning effort set to: $normalized")
+    }
 
     private val _activeTab = MutableStateFlow(AppTab.CHAT)
     val activeTab: StateFlow<AppTab> = _activeTab.asStateFlow()
@@ -197,7 +246,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // In-app logs (viewable from Gateway -> About)
-    private val _appLogs = MutableStateFlow<List<HermesAppLog.LogEntry>>(HermesAppLog.all())
+    private val _appLogs = MutableStateFlow<List<HermesAppLog.LogEntry>>(HermesAppLog.entries.value)
     val appLogs: StateFlow<List<HermesAppLog.LogEntry>> = _appLogs.asStateFlow()
 
     fun refreshLogs() {
@@ -217,6 +266,31 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private var pendingAttachments: List<String> = emptyList()
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    // Holds a partial WakeLock ONLY while a reply is streaming, so the SSE
+    // receive coroutine isn't suspended when the user locks the screen.
+    private var streamingWakeLock: android.os.PowerManager.WakeLock? = null
+
+    private fun acquireStreamingWakeLock() {
+        try {
+            if (streamingWakeLock?.isHeld == true) return
+            val pm = getApplication<Application>().getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            val lock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "hermes:stream")
+            lock.setReferenceCounted(false)
+            lock.acquire(10 * 60 * 1000L) // safety timeout: 10 min max
+            streamingWakeLock = lock
+            HermesAppLog.info("Streaming wakelock acquired (screen may be off, reply continues)")
+        } catch (e: Exception) {
+            HermesAppLog.error("Could not acquire wakelock: ${e.message}")
+        }
+    }
+
+    private fun releaseStreamingWakeLock() {
+        try {
+            streamingWakeLock?.let { if (it.isHeld) it.release() }
+        } catch (_: Exception) { }
+        streamingWakeLock = null
+    }
+
     init {
         // Start with empty chat (no fake welcome) until a session loads.
         _chatMessages.value = emptyList()
@@ -224,6 +298,13 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         startChatPolling()
         startHealthPolling()
         registerNetworkCallback()
+        // Mirror the shared logger into UI state live — new log lines appear
+        // immediately (Gateway -> APP LOGS) with no manual refresh.
+        viewModelScope.launch {
+            HermesAppLog.entries.collect { updated ->
+                _appLogs.value = updated
+            }
+        }
         // If the user already has a saved config, try connecting automatically.
         if (_config.value.tailscaleIp.isNotBlank()) {
             testPing()
@@ -312,12 +393,27 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         healthPollingJob?.cancel()
         healthPollingJob = viewModelScope.launch {
             var consecutiveFailures = 0
+            var wasScreenOff = false
             while (isActive) {
                 val cfg = _config.value
                 if (cfg.tailscaleIp.isBlank()) {
                     delay(5000)
                     continue
                 }
+                val screenOn = isScreenInteractive()
+                if (screenOn && wasScreenOff) {
+                    // Screen just came back — ping immediately so the UI reconnects fast.
+                    wasScreenOff = false
+                    val r = networkClient.ping(cfg)
+                    if (r.isSuccess) {
+                        _connectionStatus.value = ConnectionStatus.CONNECTED
+                        consecutiveFailures = 0
+                        if (_pingResult.value?.isSuccess != true) loadSessions()
+                    }
+                    delay(15000)
+                    continue
+                }
+                if (!screenOn) wasScreenOff = true
                 // Only actively probe when we're not already streaming (SSE
                 // traffic itself is proof of life) and chat is being watched.
                 if (_isStreaming.value) {
@@ -336,7 +432,13 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                         loadSessions()
                     }
                 } else {
-                    consecutiveFailures++
+                    // While the screen is off the OS may suspend our coroutines or
+                    // the radio may sleep — don't count those as real disconnects.
+                    if (!screenOn) {
+                        HermesAppLog.info("Ping failed but screen is off — not counted as disconnect")
+                    } else {
+                        consecutiveFailures++
+                    }
                     if (consecutiveFailures >= 3) {
                         _connectionStatus.value = ConnectionStatus.DISCONNECTED
                     } else {
@@ -418,7 +520,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                                 if (existing != null) {
                                     newMsg.copy(
                                         toolExecutions = if (newMsg.toolExecutions.isEmpty()) existing.toolExecutions else newMsg.toolExecutions,
-                                        attachments = if (newMsg.attachments.isEmpty()) existing.attachments else newMsg.attachments
+                                        attachments = if (newMsg.attachments.isEmpty()) existing.attachments else newMsg.attachments,
+                                        // Thinking never comes back from the server (SSE-only), so
+                                        // keep the locally streamed reasoning, else the 8s poll
+                                        // wipes it once the reply finishes.
+                                        thinkingContent = if (existing.thinkingContent.isNotBlank()) existing.thinkingContent else newMsg.thinkingContent,
+                                        thinkingDone = existing.thinkingDone || newMsg.thinkingDone
                                     )
                                 } else {
                                     newMsg
@@ -505,7 +612,24 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             _isLoadingSessions.value = true
             val result = networkClient.fetchSessions(_config.value)
             result.onSuccess { list ->
-                val sorted = list.sortedByDescending { it.startedAt }
+                // Preserve locally-bumped activity times (a session the user just
+                // messaged in must stay at the top even when the server list refreshes).
+                val prev = _sessions.value
+                val merged = list.map { fresh ->
+                    val old = prev.find { it.id == fresh.id }
+                    when {
+                        old == null -> fresh
+                        // Server reports more messages than we last saw → external
+                        // activity (Telegram reply, another gateway) → treat as new activity.
+                        fresh.messageCount > old.messageCount ->
+                            fresh.copy(lastActiveAt = System.currentTimeMillis())
+                        // Keep our local bump (we messaged in it recently).
+                        old.lastActiveAt > fresh.lastActiveAt ->
+                            fresh.copy(lastActiveAt = old.lastActiveAt)
+                        else -> fresh
+                    }
+                }
+                val sorted = merged.sortedByDescending { it.lastActiveAt.takeIf { t -> t > 0 } ?: it.startedAt }
                 _sessions.value = sorted
                 val active = sorted.find { it.id == _currentSessionId.value }
                 if (active != null) {
@@ -708,9 +832,24 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Move a session to the top of the drawer list by bumping its
+     * lastActiveAt. Called whenever the user sends a message in it or a
+     * reply/tool activity arrives for it.
+     */
+    private fun bumpSessionActivity(sessionId: String?) {
+        val sid = sessionId ?: _currentSessionId.value ?: return
+        val now = System.currentTimeMillis()
+        _sessions.update { list ->
+            list.map { s ->
+                if (s.id == sid) s.copy(lastActiveAt = now) else s
+            }
+        }
+    }
+
     fun sendMessage(prompt: String, attachments: List<String> = emptyList()) {
         val trimmed = prompt.trim()
-        if ((trimmed.isEmpty() && attachments.isEmpty()) || _isStreaming.value) return
+        if (trimmed.isEmpty() && attachments.isEmpty()) return
 
         // If no session yet, create one and queue the message to send after.
         if (_currentSessionId.value == null) {
@@ -720,10 +859,51 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        if (_isStreaming.value) {
+            // User pressed Send while a reply is in progress → stop the current
+            // reply and send this message immediately (direct-send behavior).
+            HermesAppLog.info("Streaming active — interrupting current run to send (${trimmed.take(40)})")
+            sendMessageInterrupt(trimmed, attachments)
+            return
+        }
+
         doSendMessage(trimmed, attachments)
     }
 
+    /** While streaming: stop the current run and send this message immediately. */
+    fun sendMessageInterrupt(prompt: String, attachments: List<String> = emptyList()) {
+        val trimmed = prompt.trim()
+        if (trimmed.isEmpty() && attachments.isEmpty()) return
+        stopStreaming(clearQueue = true)
+        if (_currentSessionId.value == null) {
+            pendingSend = trimmed
+            pendingAttachments = attachments
+            createNewSession()
+            return
+        }
+        doSendMessage(trimmed, attachments)
+    }
+
+    /** While streaming: push this message into the queue; it auto-sends when the current run finishes. */
+    fun sendQueuedMessage(prompt: String, attachments: List<String> = emptyList()) {
+        val trimmed = prompt.trim()
+        if (trimmed.isEmpty() && attachments.isEmpty()) return
+        if (!_isStreaming.value) {
+            // Nothing is running — send straight away.
+            sendMessage(trimmed, attachments)
+            return
+        }
+        val sid = _currentSessionId.value
+        _queuedMessages.update { list ->
+            list + QueuedMessage(trimmed, attachments, sid, System.currentTimeMillis())
+        }
+        HermesAppLog.info("Queued message (${trimmed.take(40)}) — will send when current run finishes")
+    }
+
     private fun doSendMessage(trimmed: String, attachments: List<String> = emptyList()) {
+        // This session just became active — bump it to the top of the drawer.
+        bumpSessionActivity(_currentSessionId.value)
+
         val userMessage = ChatMessage(
             id = "user_${System.currentTimeMillis()}",
             sender = MessageSender.USER,
@@ -745,6 +925,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
         _chatMessages.update { it + userMessage + agentInitialMessage }
         _isStreaming.value = true
+        acquireStreamingWakeLock()
         HermesAppLog.info("Sending to session ${_currentSessionId.value} [${_selectedModel.value.id}]${if (attachments.isNotEmpty()) " + ${attachments.size} attachment(s)" else ""}")
 
         streamingJob?.cancel()
@@ -754,12 +935,15 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 trimmed,
                 _selectedModel.value.id,
                 _currentSessionId.value,
-                attachments
+                attachments,
+                _reasoningEffort.value
             )
 
             streamFlow.collect { chunk ->
                 when (chunk) {
                     is StreamChunk.TextDelta -> {
+                        // Live reply arriving — keep this session on top.
+                        bumpSessionActivity(_currentSessionId.value)
                         _chatMessages.update { list ->
                             list.map { msg ->
                                 if (msg.id == agentMessageId) {
@@ -768,7 +952,31 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                             }
                         }
                     }
+                    is StreamChunk.ThinkingDelta -> {
+                        // Hidden reasoning — accumulate it on the message so the
+                        // UI can show it dimmed while streaming, then collapse.
+                        bumpSessionActivity(_currentSessionId.value)
+                        _chatMessages.update { list ->
+                            list.map { msg ->
+                                if (msg.id == agentMessageId) {
+                                    msg.copy(thinkingContent = msg.thinkingContent + chunk.text)
+                                } else msg
+                            }
+                        }
+                    }
+                    is StreamChunk.ThinkingDone -> {
+                        // Real reply started — the thinking phase is over.
+                        _chatMessages.update { list ->
+                            list.map { msg ->
+                                if (msg.id == agentMessageId) {
+                                    msg.copy(thinkingDone = true)
+                                } else msg
+                            }
+                        }
+                    }
                     is StreamChunk.ToolStart -> {
+                        // Tool activity started (terminal/web/etc) — bump too.
+                        bumpSessionActivity(_currentSessionId.value)
                         _chatMessages.update { list ->
                             list.map { msg ->
                                 if (msg.id == agentMessageId) {
@@ -817,6 +1025,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                         )
                         val sid = _currentSessionId.value
                         if (sid != null) {
+                            bumpSessionActivity(sid)
                             _sessions.update { list ->
                                 list.map { s ->
                                     if (s.id == sid) {
@@ -855,12 +1064,28 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             _isStreaming.value = false
+            releaseStreamingWakeLock()
+
+            // Auto-send anything queued while the previous run was in progress.
+            val queued = _queuedMessages.value
+            if (queued.isNotEmpty()) {
+                _queuedMessages.value = emptyList()
+                val next = queued.first()
+                if (next.sessionId == null || next.sessionId == _currentSessionId.value) {
+                    HermesAppLog.info("Draining queue: sending queued message (${next.prompt.take(40)})")
+                    doSendMessage(next.prompt, next.attachments)
+                } else {
+                    HermesAppLog.info("Queue item targets another session (${next.sessionId}); leaving it.")
+                }
+            }
         }
     }
 
-    fun stopStreaming() {
+    fun stopStreaming(clearQueue: Boolean = false) {
+        if (clearQueue) _queuedMessages.value = emptyList()
         streamingJob?.cancel()
         _isStreaming.value = false
+        releaseStreamingWakeLock()
         _chatMessages.update { list ->
             list.map { msg ->
                 if (msg.isStreaming) msg.copy(isStreaming = false) else msg
