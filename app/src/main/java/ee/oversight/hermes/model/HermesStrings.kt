@@ -265,14 +265,6 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.AR -> "لا توجد أجهزة محفوظة. املأ البيانات واضغط اتصال."
         AppLanguage.EN -> "No saved devices. Fill the details and press Connect."
     }
-    fun lockedModeBadge(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "مقفل"
-        AppLanguage.EN -> "LOCKED"
-    }
-    fun editingModeBadge(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تعديل"
-        AppLanguage.EN -> "EDITING"
-    }
     fun activeBadge(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "نشط"
         AppLanguage.EN -> "ACTIVE"

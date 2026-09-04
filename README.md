@@ -2,7 +2,7 @@
 
 Mobile control center for **Hermes Agent** running on a Windows PC, reached securely over **Tailscale**. Browse sessions, read chat history, switch models, send prompts with live SSE streaming + tool execution blocks, and check gateway health.
 
-> **Public release** — this app is **generic**: every user connects to **their own** Hermes PC. No author-specific IPs or keys are baked in. Package ID: `ee.oversight.hermes`. Built by [Oversight EE](https://cyber.oversight.ee).
+> **v1.2.3** — this app is **generic**: every user connects to **their own** Hermes PC. No author-specific IPs or keys are baked in. Package ID: `ee.oversight.hermes`. Built by Oversight.ee. **This app is not an official Hermes application.**
 
 This app talks to the **official Hermes API server** built into Hermes Agent (the `api_server` gateway platform) — no custom FastAPI shim required.
 
@@ -64,7 +64,7 @@ curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8080/health
 
 ## Phone Setup
 
-1. Install the APK (`HermesControl-debug.apk` or `app/build/outputs/apk/debug/app-debug.apk`).
+1. Install the APK (`HermesControl-v1.2.3.apk` at the repo root, or `app/build/outputs/apk/release/app-release.apk`).
 2. Open **Gateway** tab.
 3. Enter your PC's **Tailscale IP** (e.g. `100.124.105.88`), **port** `8080`, and the **API_SERVER_KEY** from `.env`.
 4. Tap **TEST PING** - you should see `PEER HANDSHAKE SUCCESSFUL`.
@@ -153,12 +153,27 @@ the app's "Auto-discover" then finds the PC instantly.
 ## Repo layout
 
 ```
-app/src/main/java/com/example/
+app/src/main/java/ee/oversight/hermes/
   data/HermesNetworkClient.kt     # Official API client (sessions, stream, models)
   data/HermesPreferencesRepository.kt
+  data/HermesAppLog.kt            # Live in-app log stream (StateFlow)
   model/HermesModels.kt           # Data classes + defaults (Tailscale IP, port 8080)
-  model/HermesServerScript.kt     # PC setup guide (official API server)
+  model/HermesStrings.kt          # AR/EN UI strings
   ui/HermesViewModel.kt           # State + orchestration
+  ui/MainScreen.kt                # Navigation shell
   ui/screens/                     # ChatTerminal / SystemMonitoring / GatewayConfig
+  ui/components/                  # CyberpunkTopBar, SessionsDrawer, ... 
+server/hermes_discovery_beacon.py # Same-Wi-Fi UDP discovery beacon (optional)
 server/test_official_api.py       # E2E verification against the live API server
+```
+
+## Release builds
+
+Signed release builds need the keystore (`hermes-control-release.jks`) and its
+passwords in `keystore-credentials.txt` (gitignored, local only):
+
+```bash
+./gradlew assembleRelease
+# APK: app/build/outputs/apk/release/app-release.apk
+# Copy to repo root as HermesControl-v1.2.3.apk
 ```
