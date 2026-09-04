@@ -19,3 +19,7 @@ __pycache__/
 *.jks
 keystore-credentials.txt
 *.apk
+
+# Local screenshots / WhatsApp mockups (never commit)
+*.jpeg
+WhatsApp Image *.jpeg
