@@ -265,6 +265,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private var pendingSend: String? = null
     private var pendingAttachments: List<String> = emptyList()
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var hasEverConnected = false
+    private var manuallyDisconnected = false
 
     // Holds a partial WakeLock ONLY while a reply is streaming, so the SSE
     // receive coroutine isn't suspended when the user locks the screen.
@@ -318,6 +320,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 val callback = object : ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: Network) {
                         viewModelScope.launch {
+                            if (manuallyDisconnected) {
+                                HermesAppLog.info("Network reconnected, but connection was stopped by user; skipping auto-recovery")
+                                return@launch
+                            }
                             HermesAppLog.info("Network reconnected. Triggering auto-recovery...")
                             if (_config.value.tailscaleIp.isNotBlank()) {
                                 testPing()
@@ -329,7 +335,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     override fun onLost(network: Network) {
                         viewModelScope.launch {
                             HermesAppLog.info("Network connection lost")
-                            _connectionStatus.value = ConnectionStatus.DISCONNECTED
                         }
                     }
                 }
@@ -383,11 +388,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Periodic /health check that owns connection state.
+     * Periodic /health check that maintains connection state.
      * Uses the user-entered config (IP + PORT from the gateway page) on every
-     * request. Recovers to CONNECTED automatically when the gateway comes back,
-     * and only goes DISCONNECTED after repeated real failures — so the app
-     * never flakes to offline because telemetry failed.
+     * request. Once a connection has succeeded (hasEverConnected), transient
+     * failures never downgrade status or disconnect; the app silently retries
+     * indefinitely until manually disconnected by the user. If connection has
+     * never succeeded (!hasEverConnected), repeated failures mark ERROR and then DISCONNECTED.
      */
     private fun startHealthPolling() {
         healthPollingJob?.cancel()
@@ -395,6 +401,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             var consecutiveFailures = 0
             var wasScreenOff = false
             while (isActive) {
+                if (manuallyDisconnected) {
+                    delay(15000)
+                    continue
+                }
                 val cfg = _config.value
                 if (cfg.tailscaleIp.isBlank()) {
                     delay(5000)
@@ -406,6 +416,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     wasScreenOff = false
                     val r = networkClient.ping(cfg)
                     if (r.isSuccess) {
+                        hasEverConnected = true
                         _connectionStatus.value = ConnectionStatus.CONNECTED
                         consecutiveFailures = 0
                         if (_pingResult.value?.isSuccess != true) loadSessions()
@@ -418,12 +429,15 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 // traffic itself is proof of life) and chat is being watched.
                 if (_isStreaming.value) {
                     consecutiveFailures = 0
+                    hasEverConnected = true
                     _connectionStatus.value = ConnectionStatus.CONNECTED
                     delay(15000)
                     continue
                 }
                 val result = networkClient.ping(cfg)
+                val screenStillOn = isScreenInteractive()
                 if (result.isSuccess) {
+                    hasEverConnected = true
                     _connectionStatus.value = ConnectionStatus.CONNECTED
                     consecutiveFailures = 0
                     // If we were in an error state, also refresh data so the UI
@@ -432,17 +446,21 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                         loadSessions()
                     }
                 } else {
-                    // While the screen is off the OS may suspend our coroutines or
-                    // the radio may sleep — don't count those as real disconnects.
-                    if (!screenOn) {
+                    // While the screen is off or turned off mid-ping, don't count failure.
+                    if (!screenOn || !screenStillOn) {
+                        wasScreenOff = true
                         HermesAppLog.info("Ping failed but screen is off — not counted as disconnect")
                     } else {
                         consecutiveFailures++
-                    }
-                    if (consecutiveFailures >= 3) {
-                        _connectionStatus.value = ConnectionStatus.DISCONNECTED
-                    } else {
-                        _connectionStatus.value = ConnectionStatus.ERROR
+                        if (hasEverConnected) {
+                            HermesAppLog.info("Gateway unreachable (will retry)")
+                        } else {
+                            if (consecutiveFailures >= 3) {
+                                _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                            } else {
+                                _connectionStatus.value = ConnectionStatus.ERROR
+                            }
+                        }
                     }
                 }
                 delay(15000)
@@ -579,7 +597,32 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     fun getActiveProfileName(): String = prefsRepo.getActiveProfileName()
 
+    fun connectToSaved() {
+        if (_config.value.tailscaleIp.isNotBlank()) {
+            testPing()
+        }
+    }
+
+    fun disconnectManual() {
+        manuallyDisconnected = true
+        _connectionStatus.value = ConnectionStatus.DISCONNECTED
+        HermesAppLog.info("Connection stopped by user")
+    }
+
+    fun forgetDevice() {
+        prefsRepo.clearConnectionConfig()
+        if (prefsRepo.getActiveProfileName().isNotBlank()) {
+            prefsRepo.clearActiveProfile()
+        }
+        _config.value = prefsRepo.getConnectionConfig()
+        _connectionStatus.value = ConnectionStatus.DISCONNECTED
+        hasEverConnected = false
+        manuallyDisconnected = false
+        HermesAppLog.info("Device removed")
+    }
+
     fun testPing() {
+        manuallyDisconnected = false
         viewModelScope.launch {
             _isPinging.value = true
             _connectionStatus.value = ConnectionStatus.CONNECTING
@@ -593,6 +636,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             }
             val res = networkClient.ping(currentConfig)
             if (res.isSuccess) {
+                hasEverConnected = true
                 _connectionStatus.value = ConnectionStatus.CONNECTED
                 HermesAppLog.info("Connected: ${res.message}")
                 loadSessions()
@@ -930,134 +974,170 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
         streamingJob?.cancel()
         streamingJob = viewModelScope.launch {
-            val streamFlow = networkClient.streamChat(
-                _config.value,
-                trimmed,
-                _selectedModel.value.id,
-                _currentSessionId.value,
-                attachments,
-                _reasoningEffort.value
-            )
+            var attempt = 0
+            var receivedAnyContent = false
+            while (attempt < 2) {
+                attempt++
+                receivedAnyContent = false
+                try {
+                    val streamFlow = networkClient.streamChat(
+                        _config.value,
+                        trimmed,
+                        _selectedModel.value.id,
+                        _currentSessionId.value,
+                        attachments,
+                        _reasoningEffort.value
+                    )
 
-            streamFlow.collect { chunk ->
-                when (chunk) {
-                    is StreamChunk.TextDelta -> {
-                        // Live reply arriving — keep this session on top.
-                        bumpSessionActivity(_currentSessionId.value)
-                        _chatMessages.update { list ->
-                            list.map { msg ->
-                                if (msg.id == agentMessageId) {
-                                    msg.copy(content = msg.content + chunk.text)
-                                } else msg
-                            }
-                        }
-                    }
-                    is StreamChunk.ThinkingDelta -> {
-                        // Hidden reasoning — accumulate it on the message so the
-                        // UI can show it dimmed while streaming, then collapse.
-                        bumpSessionActivity(_currentSessionId.value)
-                        _chatMessages.update { list ->
-                            list.map { msg ->
-                                if (msg.id == agentMessageId) {
-                                    msg.copy(thinkingContent = msg.thinkingContent + chunk.text)
-                                } else msg
-                            }
-                        }
-                    }
-                    is StreamChunk.ThinkingDone -> {
-                        // Real reply started — the thinking phase is over.
-                        _chatMessages.update { list ->
-                            list.map { msg ->
-                                if (msg.id == agentMessageId) {
-                                    msg.copy(thinkingDone = true)
-                                } else msg
-                            }
-                        }
-                    }
-                    is StreamChunk.ToolStart -> {
-                        // Tool activity started (terminal/web/etc) — bump too.
-                        bumpSessionActivity(_currentSessionId.value)
-                        _chatMessages.update { list ->
-                            list.map { msg ->
-                                if (msg.id == agentMessageId) {
-                                    msg.copy(toolExecutions = msg.toolExecutions + chunk.tool)
-                                } else msg
-                            }
-                        }
-                    }
-                    is StreamChunk.ToolOutput -> {
-                        _chatMessages.update { list ->
-                            list.map { msg ->
-                                if (msg.id == agentMessageId) {
-                                    val updatedTools = msg.toolExecutions.map { tool ->
-                                        if (tool.id == chunk.toolId) {
-                                            tool.copy(output = chunk.output, status = chunk.status)
-                                        } else tool
+                    streamFlow.collect { chunk ->
+                        when (chunk) {
+                            is StreamChunk.TextDelta -> {
+                                // Live reply arriving — keep this session on top.
+                                receivedAnyContent = true
+                                bumpSessionActivity(_currentSessionId.value)
+                                _chatMessages.update { list ->
+                                    list.map { msg ->
+                                        if (msg.id == agentMessageId) {
+                                            msg.copy(content = msg.content + chunk.text)
+                                        } else msg
                                     }
-                                    msg.copy(toolExecutions = updatedTools)
-                                } else msg
+                                }
                             }
-                        }
-                    }
-                    is StreamChunk.ApprovalNeeded -> {
-                        val req = chunk.request
-                        val autoApprove = _globalAutoApprove.value || (_currentSessionId.value != null && _sessionAutoApproveIds.value.contains(_currentSessionId.value))
-                        if (autoApprove) {
-                            HermesAppLog.info("Auto-approving run ${req.runId} (${req.command})")
-                            viewModelScope.launch {
-                                networkClient.submitApproval(
-                                    _config.value,
-                                    req.runId,
-                                    approved = true,
-                                    sessionId = _currentSessionId.value
-                                )
+                            is StreamChunk.ThinkingDelta -> {
+                                // Hidden reasoning — accumulate it on the message so the
+                                // UI can show it dimmed while streaming, then collapse.
+                                bumpSessionActivity(_currentSessionId.value)
+                                _chatMessages.update { list ->
+                                    list.map { msg ->
+                                        if (msg.id == agentMessageId) {
+                                            msg.copy(thinkingContent = msg.thinkingContent + chunk.text)
+                                        } else msg
+                                    }
+                                }
                             }
-                        } else {
-                            HermesAppLog.info("Interactive approval requested: ${req.command}")
-                            _activeApprovalRequest.value = req
-                        }
-                    }
-                    is StreamChunk.Usage -> {
-                        _activeTokenUsage.value = TokenUsage(
-                            inputTokens = chunk.inputTokens,
-                            outputTokens = chunk.outputTokens,
-                            totalTokens = chunk.totalTokens
-                        )
-                        val sid = _currentSessionId.value
-                        if (sid != null) {
-                            bumpSessionActivity(sid)
-                            _sessions.update { list ->
-                                list.map { s ->
-                                    if (s.id == sid) {
-                                        s.copy(
-                                            inputTokens = chunk.inputTokens,
-                                            outputTokens = chunk.outputTokens
+                            is StreamChunk.ThinkingDone -> {
+                                // Real reply started — the thinking phase is over.
+                                _chatMessages.update { list ->
+                                    list.map { msg ->
+                                        if (msg.id == agentMessageId) {
+                                            msg.copy(thinkingDone = true)
+                                        } else msg
+                                    }
+                                }
+                            }
+                            is StreamChunk.ToolStart -> {
+                                // Tool activity started (terminal/web/etc) — bump too.
+                                receivedAnyContent = true
+                                bumpSessionActivity(_currentSessionId.value)
+                                _chatMessages.update { list ->
+                                    list.map { msg ->
+                                        if (msg.id == agentMessageId) {
+                                            msg.copy(toolExecutions = msg.toolExecutions + chunk.tool)
+                                        } else msg
+                                    }
+                                }
+                            }
+                            is StreamChunk.ToolOutput -> {
+                                _chatMessages.update { list ->
+                                    list.map { msg ->
+                                        if (msg.id == agentMessageId) {
+                                            val updatedTools = msg.toolExecutions.map { tool ->
+                                                if (tool.id == chunk.toolId) {
+                                                    tool.copy(output = chunk.output, status = chunk.status)
+                                                } else tool
+                                            }
+                                            msg.copy(toolExecutions = updatedTools)
+                                        } else msg
+                                    }
+                                }
+                            }
+                            is StreamChunk.ApprovalNeeded -> {
+                                val req = chunk.request
+                                val autoApprove = _globalAutoApprove.value || (_currentSessionId.value != null && _sessionAutoApproveIds.value.contains(_currentSessionId.value))
+                                if (autoApprove) {
+                                    HermesAppLog.info("Auto-approving run ${req.runId} (${req.command})")
+                                    viewModelScope.launch {
+                                        networkClient.submitApproval(
+                                            _config.value,
+                                            req.runId,
+                                            approved = true,
+                                            sessionId = _currentSessionId.value
                                         )
-                                    } else s
+                                    }
+                                } else {
+                                    HermesAppLog.info("Interactive approval requested: ${req.command}")
+                                    _activeApprovalRequest.value = req
+                                }
+                            }
+                            is StreamChunk.Usage -> {
+                                _activeTokenUsage.value = TokenUsage(
+                                    inputTokens = chunk.inputTokens,
+                                    outputTokens = chunk.outputTokens,
+                                    totalTokens = chunk.totalTokens
+                                )
+                                val sid = _currentSessionId.value
+                                if (sid != null) {
+                                    bumpSessionActivity(sid)
+                                    _sessions.update { list ->
+                                        list.map { s ->
+                                            if (s.id == sid) {
+                                                s.copy(
+                                                    inputTokens = chunk.inputTokens,
+                                                    outputTokens = chunk.outputTokens
+                                                )
+                                            } else s
+                                        }
+                                    }
+                                }
+                            }
+                            is StreamChunk.Error -> {
+                                HermesAppLog.error("Stream error: ${chunk.message}")
+                                _chatMessages.update { list ->
+                                    list.map { msg ->
+                                        if (msg.id == agentMessageId) {
+                                            msg.copy(
+                                                content = msg.content + "\n⚠️ [Error]: ${chunk.message}",
+                                                isStreaming = false
+                                            )
+                                        } else msg
+                                    }
+                                }
+                            }
+                            StreamChunk.Done -> {
+                                HermesAppLog.info("Stream completed")
+                                _chatMessages.update { list ->
+                                    list.map { msg ->
+                                        if (msg.id == agentMessageId) {
+                                            msg.copy(isStreaming = false)
+                                        } else msg
+                                    }
                                 }
                             }
                         }
                     }
-                    is StreamChunk.Error -> {
-                        HermesAppLog.error("Stream error: ${chunk.message}")
+                    break // completed without exception
+                } catch (e: Exception) {
+                    if (attempt >= 2 || receivedAnyContent) {
+                        // Give up (or partial content already shown — don't duplicate).
+                        HermesAppLog.error("Stream failed after attempt $attempt: ${e.message}")
                         _chatMessages.update { list ->
                             list.map { msg ->
                                 if (msg.id == agentMessageId) {
                                     msg.copy(
-                                        content = msg.content + "\n⚠️ [Error]: ${chunk.message}",
+                                        content = msg.content.ifBlank {
+                                            "⚠️ Connection dropped mid-reply. Tap send to retry."
+                                        },
                                         isStreaming = false
                                     )
                                 } else msg
                             }
                         }
-                    }
-                    StreamChunk.Done -> {
-                        HermesAppLog.info("Stream completed")
+                    } else {
+                        // Failed BEFORE any content arrived — safe to auto-retry once.
+                        HermesAppLog.warn("Stream attempt $attempt failed before content (${e.message}); retrying…")
                         _chatMessages.update { list ->
                             list.map { msg ->
-                                if (msg.id == agentMessageId) {
-                                    msg.copy(isStreaming = false)
-                                } else msg
+                                if (msg.id == agentMessageId) msg.copy(content = "") else msg
                             }
                         }
                     }

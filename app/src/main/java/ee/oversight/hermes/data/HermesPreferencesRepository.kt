@@ -82,6 +82,17 @@ class HermesPreferencesRepository(context: Context) {
             .apply()
     }
 
+    fun clearConnectionConfig() {
+        prefs.edit()
+            .remove(KEY_IP)
+            .remove(KEY_PORT)
+            .remove(KEY_GATEWAY_URL)
+            .remove(KEY_USE_CUSTOM_URL)
+            .remove(KEY_API_KEY)
+            .remove(KEY_USE_HTTPS)
+            .apply()
+    }
+
     // ---- Named profiles (save/load/delete/rename) ----
 
     /** All saved profile names (most recent first). */
@@ -139,6 +150,10 @@ class HermesPreferencesRepository(context: Context) {
 
     fun setActiveProfileName(name: String) {
         prefs.edit().putString(KEY_ACTIVE_PROFILE, name).apply()
+    }
+
+    fun clearActiveProfile() {
+        prefs.edit().remove(KEY_ACTIVE_PROFILE).apply()
     }
 
     fun getSelectedModelId(): String {

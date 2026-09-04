@@ -117,9 +117,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import androidx.compose.runtime.rememberCoroutineScope
-import ee.oversight.hermes.ui.components.MonospaceToolBlock
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.style.TextOverflow
+import ee.oversight.hermes.model.ToolExecutionBlock
+import ee.oversight.hermes.model.ToolStatus
 import ee.oversight.hermes.ui.theme.CyberBg
 import ee.oversight.hermes.ui.theme.CyberSurface
 import ee.oversight.hermes.ui.theme.CyberSurfaceBorder
@@ -227,19 +229,67 @@ fun ChatTerminalScreen(
     )
     // Remember which session we already auto-scrolled to bottom for.
     var lastScrolledSession by remember { mutableStateOf<String?>(null) }
+    var userFollows by remember { mutableStateOf(true) }
+    var isProgrammaticScroll by remember { mutableStateOf(false) }
+    var prevMessagesSize by remember { mutableStateOf(0) }
 
-    val lastMsgLen = messages.lastOrNull()?.content?.length ?: 0
-    LaunchedEffect(currentSessionId, messages.size, lastMsgLen, messages.lastOrNull()?.toolExecutions?.size) {
+    // Detect user-initiated vs programmatic scrolling
+    LaunchedEffect(listState, messages.size) {
+        snapshotFlow {
+            val atBottom = isAtTrueBottom(listState, messages.size)
+            val inProgress = listState.isScrollInProgress
+            Pair(atBottom, inProgress)
+        }.collect { (atBottom, inProgress) ->
+            if (inProgress && !isProgrammaticScroll) {
+                userFollows = atBottom
+            } else if (!inProgress && atBottom) {
+                userFollows = true
+            }
+        }
+    }
+
+    val lastMessage = messages.lastOrNull()
+    val lastMsgContentLen = lastMessage?.content?.length ?: 0
+    val lastMsgThinkingLen = lastMessage?.thinkingContent?.length ?: 0
+    val lastMsgToolsCount = lastMessage?.toolExecutions?.size ?: 0
+    val lastMsgToolStatus = lastMessage?.toolExecutions?.lastOrNull()?.status
+
+    LaunchedEffect(
+        currentSessionId,
+        messages.size,
+        lastMsgContentLen,
+        lastMsgThinkingLen,
+        lastMsgToolsCount,
+        lastMsgToolStatus,
+        isStreaming
+    ) {
         val sid = currentSessionId
         if (messages.isNotEmpty()) {
             val isNewSession = sid != null && lastScrolledSession != sid
-            val isAtBottom = !listState.canScrollForward ||
-                (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= messages.size - 2
+            val isNewMessage = messages.size > prevMessagesSize
+            prevMessagesSize = messages.size
+
+            if (isNewMessage) {
+                userFollows = true
+            }
+
+            val lastIndex = messages.size - 1
             if (isNewSession) {
-                listState.scrollToItem(messages.size - 1)
+                userFollows = true
+                isProgrammaticScroll = true
+                try {
+                    listState.scrollToItem(lastIndex, scrollOffset = 500_000)
+                } finally {
+                    isProgrammaticScroll = false
+                }
                 lastScrolledSession = sid
-            } else if (isAtBottom && (isStreaming || messages.size > 1)) {
-                listState.animateScrollToItem(messages.size - 1)
+            } else if (userFollows) {
+                isProgrammaticScroll = true
+                try {
+                    listState.scrollToItem(lastIndex, scrollOffset = 500_000)
+                } finally {
+                    isProgrammaticScroll = false
+                }
             }
         }
     }
@@ -282,8 +332,14 @@ fun ChatTerminalScreen(
                         .background(CyberSurfaceElevated)
                         .border(1.dp, NeonCyan, CircleShape)
                         .clickable {
+                            userFollows = true
                             scope.launch {
-                                listState.animateScrollToItem(messages.size - 1)
+                                isProgrammaticScroll = true
+                                try {
+                                    listState.animateScrollToItem(messages.size - 1, scrollOffset = 500_000)
+                                } finally {
+                                    isProgrammaticScroll = false
+                                }
                             }
                         },
                     contentAlignment = Alignment.Center
@@ -1005,16 +1061,14 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                     )
                 }
 
-                // Tool Execution Blocks (Monospace Tool Windows)
-                if (message.toolExecutions.isNotEmpty()) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.padding(bottom = if (message.content.isNotEmpty()) 12.dp else 0.dp)
-                    ) {
-                        message.toolExecutions.forEach { tool ->
-                            MonospaceToolBlock(tool = tool, language = language)
-                        }
-                    }
+                // Tool Execution Blocks (Compact One-Line Tool Entries)
+                if (message.toolExecutions.isNotEmpty() && message.sender == MessageSender.HERMES) {
+                    ToolExecutionsBlock(
+                        toolExecutions = message.toolExecutions,
+                        thinkingDone = message.thinkingDone,
+                        isStreaming = message.isStreaming,
+                        language = language
+                    )
                 }
 
                 // AI Conversational Text
@@ -1042,7 +1096,7 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                             }
                         }
                     }
-                } else if (message.isStreaming && message.toolExecutions.isEmpty()) {
+                } else if (message.isStreaming && message.toolExecutions.isEmpty() && message.thinkingContent.isEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
                             strokeWidth = 2.dp,
@@ -1150,6 +1204,174 @@ fun ThinkingBlock(
             }
         }
     }
+}
+
+@Composable
+fun ToolExecutionsBlock(
+    toolExecutions: List<ToolExecutionBlock>,
+    thinkingDone: Boolean,
+    isStreaming: Boolean,
+    language: AppLanguage
+) {
+    if (toolExecutions.isEmpty()) return
+
+    var expanded by remember { mutableStateOf(false) }
+    val isDone = thinkingDone || !isStreaming
+    val count = toolExecutions.size
+    val toolsLabel = if (language == AppLanguage.AR) {
+        "$count أدوات"
+    } else {
+        if (count == 1) "1 tool" else "$count tools"
+    }
+    val anyRunning = toolExecutions.any { it.status == ToolStatus.RUNNING }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        // While still streaming, show each tool as one dim live line as it arrives.
+        if (!isDone) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                modifier = Modifier.padding(bottom = 4.dp)
+            ) {
+                toolExecutions.forEach { tool ->
+                    CompactToolLine(tool = tool)
+                }
+            }
+            // Live row: current count + spinner while tools are still running.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(vertical = 2.dp)
+            ) {
+                Text(
+                    text = toolsLabel,
+                    style = MonospaceStyle.copy(fontSize = 9.sp, color = NeonCyan)
+                )
+                if (anyRunning) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    CircularProgressIndicator(
+                        strokeWidth = 1.5.dp,
+                        color = NeonCyan,
+                        modifier = Modifier.size(10.dp)
+                    )
+                }
+            }
+        } else {
+            // Collapsible toggle row shown once the reply starts / message is done.
+            Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 4.dp, horizontal = 2.dp)
+                .testTag("tools_toggle")
+        ) {
+            Icon(
+                imageVector = if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = TextSecondary,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = toolsLabel,
+                style = MonospaceStyle.copy(
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isDone) TextSecondary else NeonCyan
+                )
+            )
+            if (anyRunning && isStreaming) {
+                Spacer(modifier = Modifier.width(6.dp))
+                CircularProgressIndicator(
+                    strokeWidth = 1.5.dp,
+                    color = NeonCyan,
+                    modifier = Modifier.size(10.dp)
+                )
+            }
+            }
+        } // end else (done-state toggle row)
+
+        if (expanded && isDone) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF0C1118))
+                    .border(1.dp, Color(0xFF1A2130), RoundedCornerShape(8.dp))
+                    .padding(10.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    toolExecutions.forEach { tool ->
+                        CompactToolLine(tool = tool)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CompactToolLine(
+    tool: ToolExecutionBlock,
+    modifier: Modifier = Modifier
+) {
+    val icon = getToolIcon(tool.toolName)
+    val preview = tool.command.trim().replace(Regex("\\s+"), " ").take(40)
+    val color = when (tool.status) {
+        ToolStatus.RUNNING -> NeonCyan.copy(alpha = 0.9f)
+        ToolStatus.COMPLETED -> TextSecondary.copy(alpha = 0.55f)
+        ToolStatus.FAILED -> NeonRed.copy(alpha = 0.75f)
+    }
+
+    val lineText = buildString {
+        append(icon)
+        append(" ")
+        append(tool.toolName)
+        if (preview.isNotBlank()) {
+            append(" · ")
+            append(preview)
+        }
+    }
+
+    SelectionContainer {
+        Text(
+            text = lineText,
+            style = MonospaceStyle.copy(
+                fontSize = 7.sp,
+                color = color,
+                lineHeight = 10.sp
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier.fillMaxWidth()
+        )
+    }
+}
+
+private fun getToolIcon(toolName: String): String {
+    val name = toolName.lowercase()
+    return when {
+        name.contains("search_files") || name == "search" || name.contains("find") -> "🔍"
+        name.contains("web") -> "🌐"
+        name.contains("read") -> "📄"
+        name.contains("write") -> "📝"
+        name.contains("patch") || name.contains("edit") -> "🔧"
+        name.contains("terminal") || name.contains("shell") || name.contains("bash") || name.contains("cmd") || name.contains("exec") -> "💻"
+        name.contains("search") -> "🔍"
+        else -> "⚙️"
+    }
+}
+
+private fun isAtTrueBottom(listState: LazyListState, totalItems: Int): Boolean {
+    if (totalItems <= 0) return true
+    val layoutInfo = listState.layoutInfo
+    val visibleItems = layoutInfo.visibleItemsInfo
+    if (visibleItems.isEmpty()) return true
+    val lastVisible = visibleItems.last()
+    if (lastVisible.index < totalItems - 1) return false
+    val bottomEdge = lastVisible.offset + lastVisible.size
+    val viewportBottom = layoutInfo.viewportEndOffset
+    return !listState.canScrollForward || bottomEdge <= viewportBottom + 40
 }
 
 @Composable

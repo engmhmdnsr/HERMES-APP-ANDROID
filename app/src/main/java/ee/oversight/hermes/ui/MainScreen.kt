@@ -166,6 +166,13 @@ fun MainScreen(
                         },
                         onTriggerTestApproval = {
                             viewModel.triggerMockApproval()
+                        },
+                        onToggleConnection = { on ->
+                            if (on) {
+                                viewModel.connectToSaved()
+                            } else {
+                                viewModel.disconnectManual()
+                            }
                         }
                     )
                 },
@@ -370,8 +377,19 @@ fun MainScreen(
                             savedProfiles = viewModel.getSavedProfileNames(),
                             activeProfile = viewModel.getActiveProfileName(),
                             onSaveProfile = { name -> viewModel.saveCurrentAsProfile(name) },
-                            onLoadProfile = { name -> viewModel.loadProfile(name) },
+                            onLoadProfile = { name ->
+                                viewModel.loadProfile(name)
+                                viewModel.connectToSaved()
+                            },
                             onDeleteProfile = { name -> viewModel.deleteProfile(name) },
+                            onToggleDeviceConnection = { name, connect ->
+                                if (connect) {
+                                    viewModel.loadProfile(name)
+                                    viewModel.connectToSaved()
+                                } else {
+                                    viewModel.disconnectManual()
+                                }
+                            },
                             discoveredGateway = discoveredGateway,
                             isDiscovering = isDiscovering,
                             onLanguageChange = { viewModel.setAppLanguage(it) },

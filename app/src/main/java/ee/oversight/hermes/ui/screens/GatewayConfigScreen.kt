@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Email
@@ -53,6 +54,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -99,7 +103,8 @@ import ee.oversight.hermes.ui.theme.TextSecondary
  *  - No QR pairing section (removed)
  *  - No demo/simulator mode (removed)
  *  - Language picker as dropdown
- *  - Network parameters inside a collapsible section
+ *  - Network parameters with device name and locked/editing mode
+ *  - Devices list with live toggle per device
  *  - API key help simplified to .env only
  *  - About us at the bottom
  */
@@ -121,6 +126,7 @@ fun GatewayConfigScreen(
     onSaveProfile: (String) -> Unit = {},
     onLoadProfile: (String) -> Unit = {},
     onDeleteProfile: (String) -> Unit = {},
+    onToggleDeviceConnection: (String, Boolean) -> Unit = { _, _ -> },
     discoveredGateway: DiscoveredGateway? = null,
     isDiscovering: Boolean = false,
     onStartAutoDiscovery: () -> Unit = {},
@@ -128,8 +134,12 @@ fun GatewayConfigScreen(
     modifier: Modifier = Modifier
 ) {
     val clipboardManager = LocalClipboardManager.current
-    var showNetworkParams by remember { mutableStateOf(true) }
     var languageMenuOpen by remember { mutableStateOf(false) }
+
+    val hasSavedDevices = remember(savedProfiles, config.tailscaleIp) {
+        savedProfiles.isNotEmpty() || config.tailscaleIp.isNotBlank()
+    }
+    var isEditing by remember(hasSavedDevices) { mutableStateOf(!hasSavedDevices) }
 
     var ipInput by remember(config.tailscaleIp) { mutableStateOf(config.tailscaleIp) }
     var portInput by remember(config.port) { mutableStateOf(config.port.toString()) }
@@ -137,7 +147,7 @@ fun GatewayConfigScreen(
     var remoteGatewayUrlInput by remember(config.remoteGatewayUrl) { mutableStateOf(config.remoteGatewayUrl) }
     var useCustomGatewayUrl by remember(config.useCustomGatewayUrl) { mutableStateOf(config.useCustomGatewayUrl) }
     var useHttpsInput by remember(config.useHttps) { mutableStateOf(config.useHttps) }
-    var profileNameInput by remember { mutableStateOf("") }
+    var profileNameInput by remember(activeProfile) { mutableStateOf(activeProfile) }
     var isKeyVisible by remember { mutableStateOf(false) }
     var apiKeyCopied by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
@@ -223,12 +233,12 @@ fun GatewayConfigScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // ===== Network parameters (collapsible) =====
+        // ===== Network parameters (with device name & lock/edit mode) =====
         SectionCard {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { showNetworkParams = !showNetworkParams },
+                    .clickable(enabled = hasSavedDevices) { isEditing = !isEditing },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -236,210 +246,270 @@ fun GatewayConfigScreen(
                     title = HermesStrings.networkParamsTitle(language),
                     icon = { Icon(Icons.Default.NetworkCheck, null, tint = NeonCyan, modifier = Modifier.size(16.dp)) }
                 )
-                Icon(
-                    imageVector = if (showNetworkParams) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = TextSecondary
-                )
+                if (hasSavedDevices) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (isEditing) NeonViolet.copy(alpha = 0.15f) else NeonCyan.copy(alpha = 0.12f))
+                                .border(1.dp, if (isEditing) NeonViolet.copy(alpha = 0.5f) else NeonCyan.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = if (isEditing) HermesStrings.editingModeBadge(language) else HermesStrings.lockedModeBadge(language),
+                                style = MonospaceStyle.copy(
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isEditing) NeonVioletLight else NeonCyan
+                                )
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = if (isEditing) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (isEditing) "Lock / Collapse" else "Unlock / Edit",
+                            tint = if (isEditing) NeonVioletLight else TextSecondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            AnimatedVisibility(visible = showNetworkParams) {
-                Column {
-                    // Gateway type choice
+            val isFieldsLocked = hasSavedDevices && !isEditing
+
+            Column {
+                // Device Name (FIRST FIELD)
+                OutlinedTextField(
+                    value = profileNameInput,
+                    onValueChange = { if (!isFieldsLocked) profileNameInput = it },
+                    readOnly = isFieldsLocked,
+                    enabled = !isFieldsLocked,
+                    label = { Text(HermesStrings.deviceNameLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                    placeholder = { Text(HermesStrings.deviceNamePlaceholder(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (isFieldsLocked) Icons.Default.Lock else Icons.Default.Computer,
+                            contentDescription = null,
+                            tint = if (isFieldsLocked) TextSecondary else NeonCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    },
+                    singleLine = true,
+                    textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
+                    colors = fieldColors(isFieldsLocked),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Gateway type choice
+                Text(
+                    text = HermesStrings.gatewayTypeLabel(language),
+                    style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoicePill(
+                        text = if (language == AppLanguage.AR) "عنوان IP" else "IP:Port",
+                        selected = !useCustomGatewayUrl,
+                        accent = NeonCyan,
+                        onClick = { if (!isFieldsLocked) useCustomGatewayUrl = false }
+                    )
+                    ChoicePill(
+                        text = if (language == AppLanguage.AR) "رابط مخصص" else "Custom URL",
+                        selected = useCustomGatewayUrl,
+                        accent = NeonViolet,
+                        onClick = { if (!isFieldsLocked) useCustomGatewayUrl = true }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (!useCustomGatewayUrl) {
+                    // IP field
+                    OutlinedTextField(
+                        value = ipInput,
+                        onValueChange = { if (!isFieldsLocked) ipInput = it },
+                        readOnly = isFieldsLocked,
+                        enabled = !isFieldsLocked,
+                        label = { Text(HermesStrings.tailscaleIpLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                        placeholder = { Text("100.x.x.x", style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                        singleLine = true,
+                        textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
+                        colors = fieldColors(isFieldsLocked),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = portInput,
+                        onValueChange = { if (!isFieldsLocked) portInput = it },
+                        readOnly = isFieldsLocked,
+                        enabled = !isFieldsLocked,
+                        label = { Text(HermesStrings.portLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                        placeholder = { Text("8080", style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
+                        colors = fieldColors(isFieldsLocked),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Protocol choice: HTTP / HTTPS
                     Text(
-                        text = HermesStrings.gatewayTypeLabel(language),
+                        text = if (language == AppLanguage.AR) "البروتوكول:" else "Protocol:",
                         style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary),
                         modifier = Modifier.padding(bottom = 6.dp)
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ChoicePill(
-                            text = if (language == AppLanguage.AR) "عنوان IP" else "IP:Port",
-                            selected = !useCustomGatewayUrl,
-                            accent = NeonCyan,
-                            onClick = { useCustomGatewayUrl = false }
+                            text = "HTTP",
+                            selected = !useHttpsInput,
+                            accent = NeonGreen,
+                            onClick = { if (!isFieldsLocked) useHttpsInput = false }
                         )
                         ChoicePill(
-                            text = if (language == AppLanguage.AR) "رابط مخصص" else "Custom URL",
-                            selected = useCustomGatewayUrl,
-                            accent = NeonViolet,
-                            onClick = { useCustomGatewayUrl = true }
+                            text = "HTTPS",
+                            selected = useHttpsInput,
+                            accent = NeonCyan,
+                            onClick = { if (!isFieldsLocked) useHttpsInput = true }
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    if (!useCustomGatewayUrl) {
-                        // IP field
-                        OutlinedTextField(
-                            value = ipInput,
-                            onValueChange = { ipInput = it },
-                            label = { Text(HermesStrings.tailscaleIpLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
-                            placeholder = { Text("100.x.x.x", style = MonospaceStyle.copy(fontSize = 11.sp)) },
-                            singleLine = true,
-                            textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
-                            colors = fieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = portInput,
-                            onValueChange = { portInput = it },
-                            label = { Text(HermesStrings.portLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
-                            placeholder = { Text("8080", style = MonospaceStyle.copy(fontSize = 11.sp)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
-                            colors = fieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Protocol choice: HTTP / HTTPS
-                        Text(
-                            text = if (language == AppLanguage.AR) "البروتوكول:" else "Protocol:",
-                            style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary),
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ChoicePill(
-                                text = "HTTP",
-                                selected = !useHttpsInput,
-                                accent = NeonGreen,
-                                onClick = { useHttpsInput = false }
-                            )
-                            ChoicePill(
-                                text = "HTTPS",
-                                selected = useHttpsInput,
-                                accent = NeonCyan,
-                                onClick = { useHttpsInput = true }
-                            )
-                        }
-                    } else {
-                        OutlinedTextField(
-                            value = remoteGatewayUrlInput,
-                            onValueChange = { remoteGatewayUrlInput = it },
-                            label = { Text(HermesStrings.remoteGatewayUrlLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
-                            placeholder = { Text(HermesStrings.remoteGatewayUrlPlaceholder(language), style = MonospaceStyle.copy(fontSize = 10.sp)) },
-                            singleLine = true,
-                            textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
-                            colors = fieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // API Key field
+                } else {
                     OutlinedTextField(
-                        value = apiKeyInput,
-                        onValueChange = { apiKeyInput = it },
-                        label = { Text(HermesStrings.apiKeyLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
-                        placeholder = { Text("API_SERVER_KEY", style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                        value = remoteGatewayUrlInput,
+                        onValueChange = { if (!isFieldsLocked) remoteGatewayUrlInput = it },
+                        readOnly = isFieldsLocked,
+                        enabled = !isFieldsLocked,
+                        label = { Text(HermesStrings.remoteGatewayUrlLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                        placeholder = { Text(HermesStrings.remoteGatewayUrlPlaceholder(language), style = MonospaceStyle.copy(fontSize = 10.sp)) },
                         singleLine = true,
-                        visualTransformation = if (isKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 11.sp),
-                        colors = fieldColors(),
-                        trailingIcon = {
-                            Row {
-                                IconButton(onClick = { isKeyVisible = !isKeyVisible }) {
-                                    Icon(
-                                        imageVector = if (isKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = null,
-                                        tint = TextSecondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                IconButton(onClick = {
-                                    clipboardManager.setText(AnnotatedString(apiKeyInput))
-                                    apiKeyCopied = true
-                                }) {
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCopy,
-                                        contentDescription = null,
-                                        tint = if (apiKeyCopied) NeonGreen else TextSecondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        },
+                        textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
+                        colors = fieldColors(isFieldsLocked),
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                    // Where to get the key - SIMPLE, .env only
-                    Text(
-                        text = if (language == AppLanguage.AR)
-                            "💡 المفتاح من ملف .env على جهاز الـ PC: افتح %LOCALAPPDATA%\\hermes\\.env وانسخ القيمة بعد API_SERVER_KEY="
-                        else
-                            "💡 Key is in .env on the PC: open %LOCALAPPDATA%\\hermes\\.env and copy the value after API_SERVER_KEY=",
-                        style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary),
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Buttons
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = {
-                                val parsedPort = portInput.toIntOrNull() ?: 8080
-                                onSaveConfig(
-                                    config.copy(
-                                        tailscaleIp = ipInput.trim(),
-                                        port = parsedPort,
-                                        remoteGatewayUrl = remoteGatewayUrlInput.trim(),
-                                        useCustomGatewayUrl = useCustomGatewayUrl,
-                                        apiKey = apiKeyInput.trim(),
-                                        useHttps = useHttpsInput
-                                    )
+                // API Key field
+                OutlinedTextField(
+                    value = apiKeyInput,
+                    onValueChange = { if (!isFieldsLocked) apiKeyInput = it },
+                    readOnly = isFieldsLocked,
+                    enabled = !isFieldsLocked,
+                    label = { Text(HermesStrings.apiKeyLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                    placeholder = { Text("API_SERVER_KEY", style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                    singleLine = true,
+                    visualTransformation = if (isKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 11.sp),
+                    colors = fieldColors(isFieldsLocked),
+                    trailingIcon = {
+                        Row {
+                            IconButton(onClick = { isKeyVisible = !isKeyVisible }) {
+                                Icon(
+                                    imageVector = if (isKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                onTestPing()
-                            },
-                            enabled = !isPinging,
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                        ) {
-                            if (isPinging) {
-                                CircularProgressIndicator(strokeWidth = 2.dp, color = Color.Black, modifier = Modifier.size(18.dp))
-                            } else {
-                                Icon(Icons.Default.NetworkCheck, null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = HermesStrings.testPingButton(language),
-                                    style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            }
+                            IconButton(onClick = {
+                                clipboardManager.setText(AnnotatedString(apiKeyInput))
+                                apiKeyCopied = true
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = null,
+                                    tint = if (apiKeyCopied) NeonGreen else TextSecondary,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
-                        Button(
-                            onClick = {
-                                val parsedPort = portInput.toIntOrNull() ?: 8080
-                                onSaveConfig(
-                                    config.copy(
-                                        tailscaleIp = ipInput.trim(),
-                                        port = parsedPort,
-                                        remoteGatewayUrl = remoteGatewayUrlInput.trim(),
-                                        useCustomGatewayUrl = useCustomGatewayUrl,
-                                        apiKey = apiKeyInput.trim(),
-                                        useHttps = useHttpsInput
-                                    )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Where to get the key - SIMPLE, .env only
+                Text(
+                    text = if (language == AppLanguage.AR)
+                        "💡 المفتاح من ملف .env على جهاز الـ PC: افتح %LOCALAPPDATA%\\hermes\\.env وانسخ القيمة بعد API_SERVER_KEY="
+                    else
+                        "💡 Key is in .env on the PC: open %LOCALAPPDATA%\\hermes\\.env and copy the value after API_SERVER_KEY=",
+                    style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Buttons
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = {
+                            val parsedPort = portInput.toIntOrNull() ?: 8080
+                            onSaveConfig(
+                                config.copy(
+                                    tailscaleIp = ipInput.trim(),
+                                    port = parsedPort,
+                                    remoteGatewayUrl = remoteGatewayUrlInput.trim(),
+                                    useCustomGatewayUrl = useCustomGatewayUrl,
+                                    apiKey = apiKeyInput.trim(),
+                                    useHttps = useHttpsInput
                                 )
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16202C)),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                        ) {
+                            )
+                            onTestPing()
+                        },
+                        enabled = !isPinging,
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                    ) {
+                        if (isPinging) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, color = Color.Black, modifier = Modifier.size(18.dp))
+                        } else {
+                            Icon(Icons.Default.NetworkCheck, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = HermesStrings.applyButton(language),
-                                style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonCyan)
+                                text = HermesStrings.testPingButton(language),
+                                style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                             )
                         }
+                    }
+                    Button(
+                        onClick = {
+                            val parsedPort = portInput.toIntOrNull() ?: 8080
+                            val updatedConfig = config.copy(
+                                tailscaleIp = ipInput.trim(),
+                                port = parsedPort,
+                                remoteGatewayUrl = remoteGatewayUrlInput.trim(),
+                                useCustomGatewayUrl = useCustomGatewayUrl,
+                                apiKey = apiKeyInput.trim(),
+                                useHttps = useHttpsInput
+                            )
+                            if (profileNameInput.isNotBlank()) {
+                                onSaveProfile(profileNameInput.trim())
+                            }
+                            onSaveConfig(updatedConfig)
+                            onTestPing()
+                            if (hasSavedDevices || profileNameInput.isNotBlank() || updatedConfig.tailscaleIp.isNotBlank()) {
+                                isEditing = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16202C)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                    ) {
+                        Text(
+                            text = HermesStrings.connectButton(language),
+                            style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonCyan)
+                        )
                     }
                 }
             }
@@ -484,91 +554,109 @@ fun GatewayConfigScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // ===== Saved connection profiles =====
+        // ===== Saved devices list =====
         SectionCard {
-            Text(
-                text = if (language == AppLanguage.AR) "الاتصالات المحفوظة" else "SAVED CONNECTIONS",
-                style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NeonViolet)
+            SectionHeader(
+                title = HermesStrings.devicesSectionTitle(language),
+                icon = { Icon(Icons.Default.Computer, null, tint = NeonViolet, modifier = Modifier.size(16.dp)) }
             )
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Save current as named profile
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = profileNameInput,
-                    onValueChange = { profileNameInput = it },
-                    label = { Text(if (language == AppLanguage.AR) "اسم الاتصال" else "Connection name", style = MonospaceStyle.copy(fontSize = 10.sp)) },
-                    placeholder = { Text(if (language == AppLanguage.AR) "مثال: لابتوب البيت" else "e.g. Home laptop", style = MonospaceStyle.copy(fontSize = 10.sp)) },
-                    singleLine = true,
-                    textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
-                    colors = fieldColors(),
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        if (profileNameInput.isNotBlank()) {
-                            onSaveProfile(profileNameInput.trim())
-                            profileNameInput = ""
-                        }
-                    },
-                    enabled = profileNameInput.isNotBlank() && config.tailscaleIp.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonViolet),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(42.dp)
-                ) {
-                    Text(
-                        text = if (language == AppLanguage.AR) "حفظ" else "SAVE",
-                        style = MonospaceStyle.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Profile list
             if (savedProfiles.isEmpty()) {
                 Text(
-                    text = if (language == AppLanguage.AR) "لا توجد اتصالات محفوظة. املأ البيانات وحفظها باسم." else "No saved connections. Fill in the details and save with a name.",
-                    style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                    text = HermesStrings.noSavedDevices(language),
+                    style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary),
+                    modifier = Modifier.padding(vertical = 4.dp)
                 )
             } else {
-                savedProfiles.forEach { name ->
-                    val isActive = name == activeProfile
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isActive) NeonViolet.copy(alpha = 0.15f) else CyberSurfaceElevated)
-                            .border(1.dp, if (isActive) NeonViolet else CyberSurfaceBorder, RoundedCornerShape(8.dp))
-                            .clickable { onLoadProfile(name) }
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (isActive) Icons.Default.CheckCircle else Icons.Default.Save,
-                            contentDescription = null,
-                            tint = if (isActive) NeonGreen else TextSecondary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = name,
-                            style = MonospaceStyle.copy(
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isActive) NeonGreen else TextPrimary
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                        // Load icon (tap row loads too, but give explicit hint)
-                        if (!isActive) {
-                            Icon(Icons.Default.Save, contentDescription = "Load", tint = NeonCyan, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                        }
-                        IconButton(onClick = { onDeleteProfile(name) }, modifier = Modifier.size(22.dp)) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NeonRed, modifier = Modifier.size(14.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    savedProfiles.forEach { name ->
+                        val isActive = name == activeProfile
+                        val isConnected = isActive && connectionStatus == ConnectionStatus.CONNECTED
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isActive) NeonViolet.copy(alpha = 0.12f) else CyberSurfaceElevated)
+                                .border(
+                                    1.dp,
+                                    if (isConnected) NeonGreen.copy(alpha = 0.8f)
+                                    else if (isActive) NeonViolet
+                                    else CyberSurfaceBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable {
+                                    // Load profile + connect (same as flipping the device switch ON)
+                                    onToggleDeviceConnection(name, true)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (isConnected) Icons.Default.CheckCircle else Icons.Default.Computer,
+                                    contentDescription = null,
+                                    tint = if (isConnected) NeonGreen else if (isActive) NeonVioletLight else TextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = name,
+                                        style = MonospaceStyle.copy(
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isConnected) NeonGreen else if (isActive) TextPrimary else TextPrimary.copy(alpha = 0.8f)
+                                        ),
+                                        maxLines = 1
+                                    )
+                                    if (isActive) {
+                                        Text(
+                                            text = HermesStrings.activeBadge(language),
+                                            style = MonospaceStyle.copy(
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isConnected) NeonGreen else NeonVioletLight
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier.size(width = 38.dp, height = 24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Switch(
+                                        checked = isConnected,
+                                        onCheckedChange = { checked ->
+                                            onToggleDeviceConnection(name, checked)
+                                        },
+                                        modifier = Modifier.scale(0.65f),
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = NeonGreen,
+                                            checkedTrackColor = NeonGreen.copy(alpha = 0.35f),
+                                            checkedBorderColor = NeonGreen.copy(alpha = 0.7f),
+                                            uncheckedThumbColor = TextSecondary,
+                                            uncheckedTrackColor = Color(0xFF16202C),
+                                            uncheckedBorderColor = CyberSurfaceBorder
+                                        )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                IconButton(
+                                    onClick = { onDeleteProfile(name) },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NeonRed, modifier = Modifier.size(14.dp))
+                                }
+                            }
                         }
                     }
                 }
@@ -921,9 +1009,9 @@ fun GatewayConfigScreen(
                         number = "5",
                         title = if (language == AppLanguage.AR) "دوس TEST PING" else "Press TEST PING",
                         body = if (language == AppLanguage.AR)
-                            "دوس على زر Test Ping. لو ظهرت رسالة نجاح خضرا، دوس SAVE والاتصال هيتحفظ ويشتغل."
+                            "دوس على زر Test Ping. لو ظهرت رسالة نجاح خضرا، دوس اتصال والاتصال هيتحفظ ويشتغل."
                         else
-                            "Tap Test Ping. If you get a green success message, tap SAVE and the connection will be stored and used."
+                            "Tap Test Ping. If you get a green success message, tap CONNECT and the connection will be stored and used."
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1006,11 +1094,16 @@ private fun HelpStep(number: String, title: String, body: String) {
 }
 
 @Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = NeonCyan,
+private fun fieldColors(readOnly: Boolean = false) = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = if (readOnly) CyberSurfaceBorder else NeonCyan,
     unfocusedBorderColor = CyberSurfaceBorder,
     focusedContainerColor = CyberSurfaceElevated,
-    unfocusedContainerColor = CyberSurfaceElevated
+    unfocusedContainerColor = CyberSurfaceElevated,
+    disabledBorderColor = CyberSurfaceBorder.copy(alpha = 0.5f),
+    disabledContainerColor = CyberSurfaceElevated.copy(alpha = 0.6f),
+    disabledTextColor = TextPrimary,
+    disabledLabelColor = TextSecondary.copy(alpha = 0.7f),
+    disabledPlaceholderColor = TextSecondary.copy(alpha = 0.5f)
 )
 
 @Composable

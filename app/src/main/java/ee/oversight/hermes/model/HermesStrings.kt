@@ -243,9 +243,39 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.AR -> "فحص الاتصال"
         AppLanguage.EN -> "TEST PING"
     }
-    fun applyButton(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "حفظ وتطبيق"
-        AppLanguage.EN -> "APPLY"
+    fun connectButton(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "اتصال"
+        AppLanguage.EN -> "CONNECT"
+    }
+
+    // Devices & Profiles Management
+    fun deviceNameLabel(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "اسم الجهاز"
+        AppLanguage.EN -> "Device Name"
+    }
+    fun deviceNamePlaceholder(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "مثال: كمبيوتر البيت"
+        AppLanguage.EN -> "e.g. Home PC"
+    }
+    fun devicesSectionTitle(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "الأجهزة"
+        AppLanguage.EN -> "DEVICES"
+    }
+    fun noSavedDevices(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "لا توجد أجهزة محفوظة. املأ البيانات واضغط اتصال."
+        AppLanguage.EN -> "No saved devices. Fill the details and press Connect."
+    }
+    fun lockedModeBadge(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "مقفل"
+        AppLanguage.EN -> "LOCKED"
+    }
+    fun editingModeBadge(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "تعديل"
+        AppLanguage.EN -> "EDITING"
+    }
+    fun activeBadge(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "نشط"
+        AppLanguage.EN -> "ACTIVE"
     }
 
     // Ping Results

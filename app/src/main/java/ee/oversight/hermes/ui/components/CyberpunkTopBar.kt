@@ -1,11 +1,5 @@
 package ee.oversight.hermes.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -56,11 +51,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.scale
 import ee.oversight.hermes.model.TokenUsage
 import ee.oversight.hermes.ui.theme.NeonAmber
 import ee.oversight.hermes.ui.theme.NeonVioletLight
@@ -77,19 +76,9 @@ fun CyberpunkTopBar(
     isSessionAutoApproved: Boolean = false,
     onToggleGlobalAutoApprove: ((Boolean) -> Unit)? = null,
     onTriggerTestApproval: (() -> Unit)? = null,
+    onToggleConnection: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse_topbar")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse_alpha"
-    )
-
     val (statusColor, statusLabel) = when (status) {
         ConnectionStatus.CONNECTED -> NeonGreen to HermesStrings.statusConnected(language)
         ConnectionStatus.CONNECTING -> NeonGreen.copy(alpha = 0.7f) to HermesStrings.statusConnecting(language)
@@ -190,7 +179,9 @@ fun CyberpunkTopBar(
                         RoundedCornerShape(20.dp)
                     )
                     .clickable { showTokenDetail = true }
+                    .widthIn(min = 150.dp, max = 150.dp)
                     .padding(horizontal = 10.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -230,15 +221,36 @@ fun CyberpunkTopBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Connection target
+            // Connection target + Toggle Switch
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(statusColor)
-                        .alpha(if (status == ConnectionStatus.CONNECTED) pulseAlpha else 1f)
-                )
+                    modifier = Modifier.size(width = 38.dp, height = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Switch(
+                        checked = status == ConnectionStatus.CONNECTED,
+                        onCheckedChange = { isChecked ->
+                            onToggleConnection?.invoke(isChecked)
+                        },
+                        modifier = Modifier.scale(0.65f),
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = NeonGreen,
+                            checkedTrackColor = NeonGreen.copy(alpha = 0.35f),
+                            checkedBorderColor = NeonGreen.copy(alpha = 0.7f),
+                            uncheckedThumbColor = if (status == ConnectionStatus.ERROR) NeonRed else TextSecondary,
+                            uncheckedTrackColor = Color(0xFF16202C),
+                            uncheckedBorderColor = CyberSurfaceBorder
+                        )
+                    )
+                }
+                if (status == ConnectionStatus.CONNECTING) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    CircularProgressIndicator(
+                        strokeWidth = 1.5.dp,
+                        color = NeonCyan,
+                        modifier = Modifier.size(10.dp)
+                    )
+                }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = statusLabel,
