@@ -171,16 +171,15 @@ fun CyberpunkTopBar(
             // Right side: token consumption (compact, next to the logo/title)
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(if (totalTok > 0) NeonAmber.copy(alpha = 0.10f) else Color(0xFF0F141C))
                     .border(
                         1.dp,
                         if (totalTok > 0) NeonAmber.copy(alpha = 0.35f) else Color(0xFF1A2130),
-                        RoundedCornerShape(20.dp)
+                        RoundedCornerShape(14.dp)
                     )
                     .clickable { showTokenDetail = true }
-                    .widthIn(min = 150.dp, max = 150.dp)
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                    .padding(horizontal = 9.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -188,22 +187,20 @@ fun CyberpunkTopBar(
                     imageVector = Icons.Default.Bolt,
                     contentDescription = "Token Usage",
                     tint = if (totalTok > 0) NeonAmber else TextSecondary,
-                    modifier = Modifier.size(12.dp)
+                    modifier = Modifier.size(11.dp)
                 )
-                Spacer(modifier = Modifier.width(5.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "⬆${TokenUsage.formatTokenCount(inTok)}",
-                    style = MonospaceStyle.copy(fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = NeonCyan)
+                    text = "↑${TokenUsage.formatTokenCount(inTok)}",
+                    style = MonospaceStyle.copy(fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = NeonCyan)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "⬇${TokenUsage.formatTokenCount(outTok)}",
-                    style = MonospaceStyle.copy(fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold, color = NeonVioletLight)
+                    text = " · ",
+                    style = MonospaceStyle.copy(fontSize = 9.sp, color = TextSecondary.copy(alpha = 0.5f))
                 )
-                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = TokenUsage.formatTokenCount(totalTok),
-                    style = MonospaceStyle.copy(fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = if (totalTok > 0) NeonAmber else TextSecondary)
+                    text = "↓${TokenUsage.formatTokenCount(outTok)}",
+                    style = MonospaceStyle.copy(fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = NeonVioletLight)
                 )
             }
         }
