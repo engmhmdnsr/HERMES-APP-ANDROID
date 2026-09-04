@@ -485,7 +485,7 @@ fun ChatTerminalScreen(
                     text = if (language == AppLanguage.AR)
                         "⏳ $queuedMessageCount رسالة في الانتظار... هتتبعت أول ما الرد يخلص"
                     else
-                        "⏳ $queuedMessageCount queued — will send when the current reply finishes",
+                        "⏳ $queuedMessageCount queued · will send when the current reply finishes",
                     style = MonospaceStyle.copy(fontSize = 10.5.sp, color = NeonAmber),
                     maxLines = 2
                 )
