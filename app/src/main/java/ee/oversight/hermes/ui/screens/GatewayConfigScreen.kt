@@ -517,43 +517,6 @@ fun GatewayConfigScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // ===== Connection help / tutorial (opens a popup dialog) =====
-        SectionCard(borderColor = NeonViolet.copy(alpha = 0.35f)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable { showHelpDialog = true }
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(NeonViolet.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.School, null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (language == AppLanguage.AR) "شرح التوصيل والخطوات" else "HOW TO CONNECT",
-                        style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonVioletLight)
-                    )
-                    Text(
-                        text = if (language == AppLanguage.AR) "خطوات التوصيل وجلب مفتاح Hermes API" else "Step-by-step setup + how to get the Hermes API key",
-                        style = MonospaceStyle.copy(fontSize = 9.5.sp, color = TextSecondary),
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-                Icon(Icons.Default.ChevronRight, null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
         // ===== Saved devices list =====
         SectionCard {
             SectionHeader(
@@ -660,6 +623,43 @@ fun GatewayConfigScreen(
                         }
                     }
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ===== Connection help / tutorial (opens a popup dialog) =====
+        SectionCard(borderColor = NeonViolet.copy(alpha = 0.35f)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { showHelpDialog = true }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NeonViolet.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.School, null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (language == AppLanguage.AR) "شرح التوصيل والخطوات" else "HOW TO CONNECT",
+                        style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonVioletLight)
+                    )
+                    Text(
+                        text = if (language == AppLanguage.AR) "خطوات التوصيل وجلب مفتاح Hermes API" else "Step-by-step setup + how to get the Hermes API key",
+                        style = MonospaceStyle.copy(fontSize = 9.5.sp, color = TextSecondary),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Icon(Icons.Default.ChevronRight, null, tint = NeonVioletLight, modifier = Modifier.size(16.dp))
             }
         }
 

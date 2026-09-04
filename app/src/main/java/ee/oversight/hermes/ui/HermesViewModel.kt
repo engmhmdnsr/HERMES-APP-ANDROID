@@ -609,18 +609,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         HermesAppLog.info("Connection stopped by user")
     }
 
-    fun forgetDevice() {
-        prefsRepo.clearConnectionConfig()
-        if (prefsRepo.getActiveProfileName().isNotBlank()) {
-            prefsRepo.clearActiveProfile()
-        }
-        _config.value = prefsRepo.getConnectionConfig()
-        _connectionStatus.value = ConnectionStatus.DISCONNECTED
-        hasEverConnected = false
-        manuallyDisconnected = false
-        HermesAppLog.info("Device removed")
-    }
-
     fun testPing() {
         manuallyDisconnected = false
         viewModelScope.launch {
