@@ -400,6 +400,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         healthPollingJob = viewModelScope.launch {
             var consecutiveFailures = 0
             var wasScreenOff = false
+            var lastSessionsRefresh = 0
             while (isActive) {
                 if (manuallyDisconnected) {
                     delay(15000)
@@ -443,6 +444,14 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     // If we were in an error state, also refresh data so the UI
                     // is immediately useful again after a reconnect.
                     if (_pingResult.value?.isSuccess != true) {
+                        loadSessions()
+                    }
+                    // Periodic refresh so a session that received a message from
+                    // elsewhere (Telegram, another gateway) jumps to the top of the
+                    // drawer while the app is open.
+                    lastSessionsRefresh += 1
+                    if (lastSessionsRefresh >= 2) { // ~every 30s (15s poll)
+                        lastSessionsRefresh = 0
                         loadSessions()
                     }
                 } else {
@@ -644,18 +653,16 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             _isLoadingSessions.value = true
             val result = networkClient.fetchSessions(_config.value)
             result.onSuccess { list ->
-                // Preserve locally-bumped activity times (a session the user just
-                // messaged in must stay at the top even when the server list refreshes).
+                // The server now reports real last_active timestamps, so sorting
+                // is straightforward. Keep a locally-bumped time when it is newer
+                // than the server's (a message the user just sent may not have
+                // been reflected in the server list yet).
                 val prev = _sessions.value
                 val merged = list.map { fresh ->
                     val old = prev.find { it.id == fresh.id }
                     when {
                         old == null -> fresh
-                        // Server reports more messages than we last saw → external
-                        // activity (Telegram reply, another gateway) → treat as new activity.
-                        fresh.messageCount > old.messageCount ->
-                            fresh.copy(lastActiveAt = System.currentTimeMillis())
-                        // Keep our local bump (we messaged in it recently).
+                        // Local bump (user just sent/received) is newer → keep it.
                         old.lastActiveAt > fresh.lastActiveAt ->
                             fresh.copy(lastActiveAt = old.lastActiveAt)
                         else -> fresh
@@ -866,8 +873,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     /**
      * Move a session to the top of the drawer list by bumping its
-     * lastActiveAt. Called whenever the user sends a message in it or a
-     * reply/tool activity arrives for it.
+     * lastActiveAt and re-sorting immediately. Called whenever the user
+     * sends a message in it or a reply/tool activity arrives for it.
      */
     private fun bumpSessionActivity(sessionId: String?) {
         val sid = sessionId ?: _currentSessionId.value ?: return
@@ -875,7 +882,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         _sessions.update { list ->
             list.map { s ->
                 if (s.id == sid) s.copy(lastActiveAt = now) else s
-            }
+            }.sortedByDescending { it.lastActiveAt.takeIf { t -> t > 0 } ?: it.startedAt }
         }
     }
 

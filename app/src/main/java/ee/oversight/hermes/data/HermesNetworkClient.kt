@@ -290,7 +290,12 @@ class HermesNetworkClient {
                         isThread = obj.optBoolean("is_thread", false) || obj.optString("type") == "thread",
                         isArchived = obj.optBoolean("archived", false) || obj.optBoolean("is_archived", false),
                         source = obj.optString("source", ""),
-                        lastActiveAt = (obj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
+                        // Server reports real last-activity time (last message in/out).
+                        // Fall back to started_at when absent.
+                        lastActiveAt = obj.optString("last_active").let { raw ->
+                            val ts = raw.toDoubleOrNull() ?: obj.optDouble("started_at", 0.0)
+                            (ts * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
+                        }
                     )
                 )
             }
