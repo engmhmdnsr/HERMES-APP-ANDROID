@@ -1,21 +1,20 @@
 package ee.oversight.hermes
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
 import ee.oversight.hermes.ui.MainScreen
 import ee.oversight.hermes.ui.theme.HermesTheme
-import ee.oversight.hermes.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
+    // The app carries an API key and private conversations. Don't let the
+    // recents/app-switcher preview show them (key stays out of screenshots).
+    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     setContent {
       HermesTheme {
         MainScreen()
@@ -23,15 +22,3 @@ class MainActivity : ComponentActivity() {
     }
   }
 }
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-  Text(text = "Hello $name!", modifier = modifier)
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-  MyApplicationTheme { Greeting("Android") }
-}
-

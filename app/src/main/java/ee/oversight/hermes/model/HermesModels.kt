@@ -175,7 +175,8 @@ data class HermesSession(
     val isThread: Boolean = false,
     val isArchived: Boolean = false,
     val source: String = "", // e.g. "desktop", "api_server", "telegram", "mobile_app"
-    val lastActiveAt: Long = 0L // bumped whenever the session sends/receives a message
+    val lastActiveAt: Long = 0L, // bumped whenever the session sends/receives a message
+    val costUsd: Double = 0.0 // server-reported session cost (actual_cost_usd/estimated_cost_usd)
 ) {
     val totalTokens: Long get() = inputTokens + outputTokens
     fun toTokenUsage(): TokenUsage = TokenUsage(

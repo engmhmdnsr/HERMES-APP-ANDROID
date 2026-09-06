@@ -266,42 +266,45 @@ class HermesNetworkClient {
         try {
             val url = "${config.baseUrl}/api/sessions?limit=100"
             val request = Request.Builder().url(url).authHeaders(config).get().build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
-            }
-            val bodyStr = response.body?.string() ?: "{}"
-            val json = JSONObject(bodyStr)
-            val array = json.optJSONArray("data") ?: JSONArray()
-            val list = mutableListOf<HermesSession>()
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                list.add(
-                    HermesSession(
-                        id = obj.getString("id"),
-                        title = cleanSessionTitle(obj.optString("title")),
-                        model = obj.optString("model", "default"),
-                        startedAt = (obj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
-                        messageCount = obj.optInt("message_count", 0),
-                        inputTokens = obj.optLong("input_tokens", 0L),
-                        outputTokens = obj.optLong("output_tokens", 0L),
-                        reasoningTokens = obj.optLong("reasoning_tokens", 0L),
-                        isPinned = obj.optBoolean("pinned", false) || obj.optBoolean("is_pinned", false),
-                        isThread = obj.optBoolean("is_thread", false) || obj.optString("type") == "thread",
-                        isArchived = obj.optBoolean("archived", false) || obj.optBoolean("is_archived", false),
-                        source = obj.optString("source", ""),
-                        // Server reports real last-activity time (last message in/out).
-                        // Fall back to started_at when absent.
-                        lastActiveAt = obj.optString("last_active").let { raw ->
-                            val ts = raw.toDoubleOrNull() ?: obj.optDouble("started_at", 0.0)
-                            (ts * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
-                        }
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val json = JSONObject(bodyStr)
+                val array = json.optJSONArray("data") ?: JSONArray()
+                val list = mutableListOf<HermesSession>()
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    list.add(
+                        HermesSession(
+                            id = obj.getString("id"),
+                            title = cleanSessionTitle(obj.optString("title")),
+                            model = obj.optString("model", "default"),
+                            startedAt = (obj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
+                            messageCount = obj.optInt("message_count", 0),
+                            inputTokens = obj.optLong("input_tokens", 0L),
+                            outputTokens = obj.optLong("output_tokens", 0L),
+                            reasoningTokens = obj.optLong("reasoning_tokens", 0L),
+                            isPinned = obj.optBoolean("pinned", false) || obj.optBoolean("is_pinned", false),
+                            isThread = obj.optBoolean("is_thread", false) || obj.optString("type") == "thread",
+                            isArchived = obj.optBoolean("archived", false) || obj.optBoolean("is_archived", false),
+                            source = obj.optString("source", ""),
+                            costUsd = obj.optDouble("actual_cost_usd", 0.0)
+                                .takeIf { it > 0 } ?: obj.optDouble("estimated_cost_usd", 0.0),
+                            // Server reports real last-activity time (last message in/out).
+                            // Fall back to started_at when absent.
+                            lastActiveAt = obj.optString("last_active").let { raw ->
+                                val ts = raw.toDoubleOrNull() ?: obj.optDouble("started_at", 0.0)
+                                (ts * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
+                            }
+                        )
                     )
-                )
+                }
+                // Sort newest first
+                list.sortByDescending { it.startedAt }
+                Result.success(list)
             }
-            // Sort newest first
-            list.sortByDescending { it.startedAt }
-            Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -321,45 +324,46 @@ class HermesNetworkClient {
             while (list.size < maxMessages) {
                 val url = "${config.baseUrl}/api/sessions/$sessionId/messages?limit=$limit&offset=$offset"
                 val request = Request.Builder().url(url).authHeaders(config).get().build()
-                val response = client.newCall(request).execute()
-                if (!response.isSuccessful) {
-                    if (list.isNotEmpty()) break
-                    return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
-                }
-                val bodyStr = response.body?.string() ?: "{}"
-                val json = JSONObject(bodyStr)
-                val array = json.optJSONArray("data") ?: JSONArray()
-                if (array.length() == 0) break
-
-                for (i in 0 until array.length()) {
-                    val obj = array.getJSONObject(i)
-                    val role = obj.optString("role", "user")
-                    // Filter out tool output and internal system messages
-                    if (role == "tool" || role == "system") continue
-
-                    val rawContent = obj.optString("content", "")
-                    val trimmed = rawContent.trim()
-                    // Filter out raw JSON tool execution payloads
-                    if (trimmed.startsWith("{\"output\":") || 
-                        trimmed.startsWith("{\"total_count\":") || 
-                        (trimmed.startsWith("{\"success\":") && trimmed.contains("\"exit_code\""))) {
-                        continue
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        if (list.isNotEmpty()) return@use
+                        return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
                     }
-                    if (trimmed.isEmpty()) continue
+                    val bodyStr = response.body?.string() ?: "{}"
+                    val json = JSONObject(bodyStr)
+                    val array = json.optJSONArray("data") ?: JSONArray()
+                    if (array.length() == 0) return@use
 
-                    val ts = (obj.optDouble("timestamp", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
-                    list.add(
-                        ChatMessage(
-                            id = obj.optString("id", "${sessionId}_${offset + i}"),
-                            sender = if (role == "assistant") MessageSender.HERMES else MessageSender.USER,
-                            timestamp = ts,
-                            content = rawContent
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        val role = obj.optString("role", "user")
+                        // Filter out tool output and internal system messages
+                        if (role == "tool" || role == "system") continue
+
+                        val rawContent = obj.optString("content", "")
+                        val trimmed = rawContent.trim()
+                        // Filter out raw JSON tool execution payloads
+                        if (trimmed.startsWith("{\"output\":") ||
+                            trimmed.startsWith("{\"total_count\":") ||
+                            (trimmed.startsWith("{\"success\":") && trimmed.contains("\"exit_code\""))) {
+                            continue
+                        }
+                        if (trimmed.isEmpty()) continue
+
+                        val ts = (obj.optDouble("timestamp", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
+                        list.add(
+                            ChatMessage(
+                                id = obj.optString("id", "${sessionId}_${offset + i}"),
+                                sender = if (role == "assistant") MessageSender.HERMES else MessageSender.USER,
+                                timestamp = ts,
+                                content = rawContent
+                            )
                         )
-                    )
-                }
+                    }
 
-                if (array.length() < limit) break
-                offset += array.length()
+                    if (array.length() < limit) return@use
+                    offset += array.length()
+                }
             }
 
             // Ensure chronological order
@@ -377,11 +381,12 @@ class HermesNetworkClient {
         try {
             val url = "${config.baseUrl}/api/sessions/$sessionId"
             val request = Request.Builder().url(url).authHeaders(config).delete().build()
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                Result.success(true)
-            } else {
-                Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    Result.success(true)
+                } else {
+                    Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -401,24 +406,25 @@ class HermesNetworkClient {
             }
             val body = payload.toString().toRequestBody("application/json".toMediaType())
             val request = Request.Builder().url(url).authHeaders(config).post(body).build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@use Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                // Response is {"object":"hermes.session","session":{...}}
+                val json = JSONObject(bodyStr)
+                val sessionObj = json.optJSONObject("session") ?: json
+                val session = HermesSession(
+                    id = sessionObj.getString("id"),
+                    title = cleanSessionTitle(sessionObj.optString("title")),
+                    model = sessionObj.optString("model", model ?: "default"),
+                    startedAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
+                    messageCount = sessionObj.optInt("message_count", 0),
+                    source = sessionObj.optString("source", "mobile_app"),
+                    lastActiveAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
+                )
+                Result.success(session)
             }
-            val bodyStr = response.body?.string() ?: "{}"
-            // Response is {"object":"hermes.session","session":{...}}
-            val json = JSONObject(bodyStr)
-            val sessionObj = json.optJSONObject("session") ?: json
-            val session = HermesSession(
-                id = sessionObj.getString("id"),
-                title = cleanSessionTitle(sessionObj.optString("title")),
-                model = sessionObj.optString("model", model ?: "default"),
-                startedAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
-                messageCount = sessionObj.optInt("message_count", 0),
-                source = sessionObj.optString("source", "mobile_app"),
-                lastActiveAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
-            )
-            Result.success(session)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -433,50 +439,51 @@ class HermesNetworkClient {
         try {
             val url = "${config.baseUrl}/api/model/options"
             val request = Request.Builder().url(url).authHeaders(config).get().build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
-            }
-            val bodyStr = response.body?.string() ?: "{}"
-            val json = JSONObject(bodyStr)
-            val providers = json.optJSONArray("providers") ?: JSONArray()
-            val list = mutableListOf<AiModelInfo>()
-            val seen = mutableSetOf<String>()
-            val providerNames = mutableMapOf<String, String>()
-
-            // First pass: collect provider display names
-            for (i in 0 until providers.length()) {
-                val p = providers.getJSONObject(i)
-                providerNames[p.optString("slug")] = p.optString("name", p.optString("slug"))
-            }
-
-            // Second pass: models
-            for (i in 0 until providers.length()) {
-                val p = providers.getJSONObject(i)
-                val slug = p.optString("slug")
-                val displayName = providerNames[slug] ?: slug
-                val models = p.optJSONArray("models") ?: JSONArray()
-                for (j in 0 until models.length()) {
-                    val modelId = models.optString(j)
-                    if (modelId.isBlank() || "embed" in modelId.lowercase()) continue
-                    if (modelId in seen) continue
-                    seen.add(modelId)
-                    val clean = modelId.substringAfterLast('/')
-                        .replace("-", " ")
-                        .replace("_", " ")
-                        .replaceFirstChar { it.uppercase() }
-                    list.add(
-                        AiModelInfo(
-                            id = modelId,
-                            displayName = clean,
-                            provider = displayName,
-                            description = "$displayName: $modelId",
-                            isDefault = modelId == "deepseek/deepseek-v4-flash"
-                        )
-                    )
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@use Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
                 }
+                val bodyStr = response.body?.string() ?: "{}"
+                val json = JSONObject(bodyStr)
+                val providers = json.optJSONArray("providers") ?: JSONArray()
+                val list = mutableListOf<AiModelInfo>()
+                val seen = mutableSetOf<String>()
+                val providerNames = mutableMapOf<String, String>()
+
+                // First pass: collect provider display names
+                for (i in 0 until providers.length()) {
+                    val p = providers.getJSONObject(i)
+                    providerNames[p.optString("slug")] = p.optString("name", p.optString("slug"))
+                }
+
+                // Second pass: models
+                for (i in 0 until providers.length()) {
+                    val p = providers.getJSONObject(i)
+                    val slug = p.optString("slug")
+                    val displayName = providerNames[slug] ?: slug
+                    val models = p.optJSONArray("models") ?: JSONArray()
+                    for (j in 0 until models.length()) {
+                        val modelId = models.optString(j)
+                        if (modelId.isBlank() || "embed" in modelId.lowercase()) continue
+                        if (modelId in seen) continue
+                        seen.add(modelId)
+                        val clean = modelId.substringAfterLast('/')
+                            .replace("-", " ")
+                            .replace("_", " ")
+                            .replaceFirstChar { it.uppercase() }
+                        list.add(
+                            AiModelInfo(
+                                id = modelId,
+                                displayName = clean,
+                                provider = displayName,
+                                description = "$displayName: $modelId",
+                                isDefault = modelId == "deepseek/deepseek-v4-flash"
+                            )
+                        )
+                    }
+                }
+                if (list.isEmpty()) Result.failure(Exception("No models returned")) else Result.success(list)
             }
-            if (list.isEmpty()) Result.failure(Exception("No models returned")) else Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -495,12 +502,13 @@ class HermesNetworkClient {
             }
             val body = payload.toString().toRequestBody("application/json".toMediaType())
             val request = Request.Builder().url(url).authHeaders(config).post(body).build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                val errBody = response.body?.string() ?: ""
-                return@withContext Result.failure(Exception("HTTP ${response.code}: $errBody"))
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errBody = response.body?.string() ?: ""
+                    return@use Result.failure(Exception("HTTP ${response.code}: $errBody"))
+                }
+                Result.success(Unit)
             }
-            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

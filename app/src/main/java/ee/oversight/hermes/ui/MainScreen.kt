@@ -96,6 +96,7 @@ fun MainScreen(
     val sessionAutoApproveIds by viewModel.sessionAutoApproveIds.collectAsState()
     val queuedMessages by viewModel.queuedMessages.collectAsState()
     val isSessionAutoApproved = currentSessionId != null && sessionAutoApproveIds.contains(currentSessionId)
+    val currentSessionCost = sessions.find { it.id == currentSessionId }?.costUsd ?: 0.0
 
     val layoutDirection = if (language == AppLanguage.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
 
@@ -153,6 +154,7 @@ fun MainScreen(
                         config = config,
                         pingMs = telemetry.pingMs,
                         tokenUsage = tokenUsage,
+                        sessionCostUsd = currentSessionCost,
                         language = language,
                         onOpenDrawer = {
                             scope.launch {

@@ -71,6 +71,7 @@ fun CyberpunkTopBar(
     pingMs: Long,
     language: AppLanguage,
     tokenUsage: TokenUsage? = null,
+    sessionCostUsd: Double = 0.0,
     onOpenDrawer: (() -> Unit)? = null,
     globalAutoApprove: Boolean = false,
     isSessionAutoApproved: Boolean = false,
@@ -412,6 +413,26 @@ fun CyberpunkTopBar(
                                 text = "${TokenUsage.formatTokenCount(totalTok)} ($totalTok)",
                                 style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonAmber)
                             )
+                        }
+                        if (sessionCostUsd > 0) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF141923))
+                                    .border(1.dp, NeonGreen.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (language == AppLanguage.AR) "💰 التكلفة (Cost):" else "💰 Session Cost:",
+                                    style = MonospaceStyle.copy(fontSize = 12.sp, color = TextSecondary)
+                                )
+                                Text(
+                                    text = "$" + "%.4f".format(java.util.Locale.US, sessionCostUsd),
+                                    style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NeonGreen)
+                                )
+                            }
                         }
                     }
                 },

@@ -2,6 +2,7 @@ package ee.oversight.hermes.data
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -30,9 +31,9 @@ object HermesAppLog {
 
     /** Thread-safe append with automatic size cap. */
     fun log(level: String, message: String) {
-        val current = _entries.value
-        val updated = (current + LogEntry(level = level, message = message)).takeLast(MAX_ENTRIES)
-        _entries.value = updated
+        _entries.update { current ->
+            (current + LogEntry(level = level, message = message)).takeLast(MAX_ENTRIES)
+        }
     }
 
     fun info(message: String) = log("INFO", message)

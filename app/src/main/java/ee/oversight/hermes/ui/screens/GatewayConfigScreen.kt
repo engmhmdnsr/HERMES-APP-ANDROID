@@ -135,8 +135,8 @@ fun GatewayConfigScreen(
     modifier: Modifier = Modifier
 ) {
     val clipboardManager = LocalClipboardManager.current
+    val ctx = LocalContext.current
     var languageMenuOpen by remember { mutableStateOf(false) }
-
     val hasSavedDevices = remember(savedProfiles, config.tailscaleIp) {
         savedProfiles.isNotEmpty() || config.tailscaleIp.isNotBlank()
     }
@@ -387,7 +387,15 @@ fun GatewayConfigScreen(
                                 )
                             }
                             IconButton(onClick = {
-                                clipboardManager.setText(AnnotatedString(apiKeyInput))
+                                val systemClipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clip = android.content.ClipData.newPlainText("API key", apiKeyInput)
+                                // Android 13+: don't show the key in the clipboard
+                                // preview overlay (sensitive content).
+                                @Suppress("DEPRECATION")
+                                clip.description.extras = android.os.PersistableBundle().apply {
+                                    putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+                                }
+                                systemClipboard.setPrimaryClip(clip)
                                 apiKeyCopied = true
                             }) {
                                 Icon(
@@ -725,7 +733,15 @@ fun GatewayConfigScreen(
                     IconButton(
                         onClick = {
                             val allLogsText = logs.reversed().joinToString("\n") { HermesAppLog.formatEntry(it) }
-                            clipboardManager.setText(AnnotatedString(allLogsText))
+                            val systemClipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("Hermes logs", allLogsText)
+                            // Logs can contain command output — keep them out of the
+                            // Android 13+ clipboard preview too.
+                            @Suppress("DEPRECATION")
+                            clip.description.extras = android.os.PersistableBundle().apply {
+                                putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+                            }
+                            systemClipboard.setPrimaryClip(clip)
                             Toast.makeText(ctx, if (language == AppLanguage.AR) "تم نسخ كافة السجلات" else "All logs copied", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.size(28.dp)

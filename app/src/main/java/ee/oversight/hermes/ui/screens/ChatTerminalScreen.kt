@@ -198,10 +198,16 @@ fun ChatTerminalScreen(
         contract = ActivityResultContracts.GetMultipleContents(),
         onResult = { uris ->
             if (uris.isNotEmpty()) {
-                val newImages = uris.mapNotNull { uri ->
-                    uriToCompressedDataUrl(context, uri)
+                // Compress/decode off the main thread — a 12MP photo can freeze
+                // the UI for seconds if done inline here.
+                scope.launch(Dispatchers.IO) {
+                    val newImages = uris.mapNotNull { uri ->
+                        uriToCompressedDataUrl(context, uri)
+                    }
+                    withContext(Dispatchers.Main) {
+                        pendingImages = pendingImages + newImages
+                    }
                 }
-                pendingImages = pendingImages + newImages
             }
         }
     )
@@ -879,17 +885,24 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
     val formattedTime = remember(message.timestamp) { timeFormat.format(Date(message.timestamp)) }
 
-    // Blinking cursor for streaming
-    val infiniteTransition = rememberInfiniteTransition(label = "cursor_stream")
-    val cursorAlpha by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(450, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "cursor_alpha"
-    )
+    // Blinking cursor for streaming — the infinite animation only runs on
+    // messages that are actually streaming (else every agent message in the
+    // list would drive a forever animation).
+    val cursorAlpha = if (message.isStreaming) {
+        val infiniteTransition = rememberInfiniteTransition(label = "cursor_stream")
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(450, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "cursor_alpha"
+        )
+        alpha
+    } else {
+        1f
+    }
 
     if (message.sender == MessageSender.USER) {
         // User Message (Right Aligned)
@@ -1071,31 +1084,14 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                     )
                 }
 
-                // AI Conversational Text
+                // AI Conversational Text (with code-block rendering)
                 if (message.content.isNotEmpty()) {
-                    SelectionContainer {
-                        Row {
-                            Text(
-                                text = message.content,
-                                style = MonospaceStyle.copy(
-                                    fontSize = 13.5.sp,
-                                    color = TextPrimary,
-                                    lineHeight = 21.sp
-                                )
-                            )
-                            if (message.isStreaming) {
-                                Text(
-                                    text = " ▋",
-                                    style = MonospaceStyle.copy(
-                                        fontSize = 14.sp,
-                                        color = NeonCyan,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    modifier = Modifier.alpha(cursorAlpha)
-                                )
-                            }
-                        }
-                    }
+                    MessageContent(
+                        content = message.content,
+                        cursorAlpha = cursorAlpha,
+                        isStreaming = message.isStreaming,
+                        language = language
+                    )
                 } else if (message.isStreaming && message.toolExecutions.isEmpty() && message.thinkingContent.isEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
@@ -1116,6 +1112,117 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
             }
         }
     }
+}
+
+@Composable
+fun MessageContent(
+    content: String,
+    cursorAlpha: Float,
+    isStreaming: Boolean,
+    language: AppLanguage
+) {
+    val clipboard = LocalClipboardManager.current
+    val ctx = LocalContext.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Split on ```fences``` — code blocks get a bordered box + copy button,
+        // everything else stays selectable plain text.
+        val parts = remember(content) { splitCodeFences(content) }
+        parts.forEachIndexed { index, part ->
+            if (part.isCode) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF0C1017))
+                        .border(1.dp, NeonCyan.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF131A24))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = part.lang.ifBlank { "code" },
+                            style = MonospaceStyle.copy(fontSize = 9.sp, color = NeonCyan),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(part.text))
+                                Toast.makeText(ctx, if (language == AppLanguage.AR) "تم نسخ الكود" else "Code copied", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy code",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = part.text,
+                        style = MonospaceStyle.copy(fontSize = 12.sp, color = Color(0xFFD8E0EA), lineHeight = 18.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    )
+                }
+            } else if (part.text.isNotBlank()) {
+                SelectionContainer {
+                    Row {
+                        Text(
+                            text = part.text,
+                            style = MonospaceStyle.copy(
+                                fontSize = 13.5.sp,
+                                color = TextPrimary,
+                                lineHeight = 21.sp
+                            )
+                        )
+                        // Blinking cursor only at the very end while streaming.
+                        if (isStreaming && index == parts.lastIndex) {
+                            Text(
+                                text = " ▋",
+                                style = MonospaceStyle.copy(
+                                    fontSize = 14.sp,
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                modifier = Modifier.alpha(cursorAlpha)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class CodePart(val text: String, val isCode: Boolean, val lang: String = "")
+
+/** Split text on ```lang\n...\n``` fences into code / plain parts. */
+private fun splitCodeFences(content: String): List<CodePart> {
+    if ("```" !in content) return listOf(CodePart(content, isCode = false))
+    val parts = mutableListOf<CodePart>()
+    val regex = Regex("```([^\\n`]*)\\n?([\\s\\S]*?)```")
+    var lastEnd = 0
+    regex.findAll(content).forEach { m ->
+        if (m.range.first > lastEnd) {
+            parts.add(CodePart(content.substring(lastEnd, m.range.first), isCode = false))
+        }
+        parts.add(CodePart(m.groupValues[2].trimEnd('\n'), isCode = true, lang = m.groupValues[1].trim()))
+        lastEnd = m.range.last + 1
+    }
+    if (lastEnd < content.length) {
+        parts.add(CodePart(content.substring(lastEnd), isCode = false))
+    }
+    if (parts.isEmpty()) parts.add(CodePart(content, isCode = false))
+    return parts
 }
 
 @Composable
