@@ -67,6 +67,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -171,6 +173,7 @@ fun ChatTerminalScreen(
 ) {
     var promptInput by remember { mutableStateOf("") }
     var showAllModelsSheet by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     // Image attachments picked for the next message (data URLs)
     var pendingImages by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -303,11 +306,64 @@ fun ChatTerminalScreen(
         }
     }
 
+    // Client-side search filter over the loaded messages
+    val visibleMessages = if (searchQuery.isBlank()) {
+        messages
+    } else {
+        val q = searchQuery.trim().lowercase()
+        messages.filter { msg ->
+            msg.content.lowercase().contains(q) ||
+                msg.toolExecutions.any { it.command.lowercase().contains(q) || (it.output ?: "").lowercase().contains(q) }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(CyberBg)
     ) {
+        // In-session search bar (client-side)
+        if (searchQuery.isNotBlank() || messages.size > 15) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF141923))
+                    .border(1.dp, if (searchQuery.isNotBlank()) NeonCyan.copy(alpha = 0.5f) else CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Search, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                TextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = {
+                        Text(
+                            if (language == AppLanguage.AR) "ابحث في الرسائل..." else "Search messages...",
+                            style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary)
+                        )
+                    },
+                    singleLine = true,
+                    textStyle = MonospaceStyle.copy(fontSize = 12.sp, color = TextPrimary),
+                    modifier = Modifier.weight(1f),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        cursorColor = NeonCyan
+                    )
+                )
+                if (searchQuery.isNotBlank()) {
+                    IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
+
         // Chat Message Stream with Floating Scroll-To-Bottom Button
         Box(
             modifier = Modifier
@@ -354,7 +410,7 @@ fun ChatTerminalScreen(
                 contentPadding = PaddingValues(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                items(messages, key = { it.id }) { message ->
+                items(visibleMessages, key = { it.id }) { message ->
                     ChatMessageItem(message = message, language = language)
                 }
             }

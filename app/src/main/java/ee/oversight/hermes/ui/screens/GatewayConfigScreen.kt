@@ -117,6 +117,8 @@ fun GatewayConfigScreen(
     isPinging: Boolean,
     language: AppLanguage,
     onLanguageChange: (AppLanguage) -> Unit,
+    biometricLockEnabled: Boolean = false,
+    onToggleBiometricLock: (Boolean) -> Unit = {},
     onSaveConfig: (ConnectionConfig) -> Unit,
     onTestPing: () -> Unit,
     logs: List<HermesAppLog.LogEntry> = emptyList(),
@@ -231,6 +233,46 @@ fun GatewayConfigScreen(
                         trailingIcon = { if (language == AppLanguage.AR) Icon(Icons.Default.Check, null, tint = NeonCyan, modifier = Modifier.size(14.dp)) }
                     )
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ===== Security: biometric app lock =====
+        SectionCard {
+            SectionHeader(
+                title = if (language == AppLanguage.AR) "الأمان" else "SECURITY",
+                icon = { Icon(Icons.Default.Lock, null, tint = NeonGreen, modifier = Modifier.size(16.dp)) }
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (language == AppLanguage.AR) "قفل التطبيق بالبصمة" else "Biometric app lock",
+                        style = MonospaceStyle.copy(fontSize = 12.sp, color = TextPrimary)
+                    )
+                    Text(
+                        text = if (language == AppLanguage.AR)
+                            "اطلب بصمة الإصبع أو الوجه عند فتح التطبيق (يحمي مفتاح API)"
+                        else
+                            "Require fingerprint/face to open the app (protects your API key)",
+                        style = MonospaceStyle.copy(fontSize = 9.sp, color = TextSecondary)
+                    )
+                }
+                Switch(
+                    checked = biometricLockEnabled,
+                    onCheckedChange = { onToggleBiometricLock(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = NeonGreen,
+                        checkedTrackColor = NeonGreen.copy(alpha = 0.4f)
+                    )
+                )
             }
         }
 

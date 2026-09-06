@@ -4,6 +4,7 @@ import ee.oversight.hermes.model.AiModelInfo
 import ee.oversight.hermes.model.ChatMessage
 import ee.oversight.hermes.model.ConnectionConfig
 import ee.oversight.hermes.model.DiscoveredGateway
+import ee.oversight.hermes.model.GatewayHealth
 import ee.oversight.hermes.model.HermesSession
 import ee.oversight.hermes.model.MessageSender
 import ee.oversight.hermes.model.ProcessInfo
@@ -188,6 +189,59 @@ class HermesNetworkClient {
                 statusCode = 0,
                 message = "Gateway unreachable at ${config.baseUrl} (${e.localizedMessage ?: "Connection refused"})"
             )
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Gateway health: GET /health/detailed (official API — works on every
+    // stock Hermes server, no patches needed). Gives gateway/platform state,
+    // readiness, disk usage and version.
+    // ------------------------------------------------------------------
+    suspend fun fetchGatewayHealth(config: ConnectionConfig): Result<GatewayHealth> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/health/detailed"
+            val request = Request.Builder().url(url).authHeaders(config).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("HTTP ${response.code}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val json = JSONObject(bodyStr)
+                val platform = json.optString("platform", "hermes-agent")
+                val version = json.optString("version", "")
+                val gatewayState = json.optString("gateway_state", "unknown")
+
+                // platforms: {telegram: {state: connected, ...}, ...}
+                val platformsJson = json.optJSONObject("platforms") ?: JSONObject()
+                val platformStates = mutableListOf<Pair<String, String>>()
+                val pKeys = platformsJson.keys()
+                while (pKeys.hasNext()) {
+                    val name = pKeys.next()
+                    val pObj = platformsJson.optJSONObject(name)
+                    platformStates.add(name to (pObj?.optString("state", "unknown") ?: "unknown"))
+                }
+
+                // readiness.checks: {state_db: {...}, disk: {...}, ...}
+                val readinessJson = json.optJSONObject("readiness") ?: JSONObject()
+                val checksJson = readinessJson.optJSONObject("checks") ?: JSONObject()
+                val diskCheck = checksJson.optJSONObject("disk")
+                val diskUsedPct = diskCheck?.optDouble("used_percent", 0.0)?.toFloat() ?: 0f
+                val diskFreeBytes = diskCheck?.optLong("free_bytes", 0L) ?: 0L
+
+                Result.success(
+                    GatewayHealth(
+                        platform = platform,
+                        version = version,
+                        gatewayState = gatewayState,
+                        platformStates = platformStates,
+                        diskUsedPercent = diskUsedPct,
+                        diskFreeGb = (diskFreeBytes / (1024.0 * 1024.0 * 1024.0)).toFloat(),
+                        readinessOk = readinessJson.optString("status", "ok") == "ok"
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

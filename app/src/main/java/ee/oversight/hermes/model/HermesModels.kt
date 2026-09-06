@@ -136,6 +136,17 @@ data class AiModelInfo(
 // until the live catalog loads.
 val AvailableAiModels = emptyList<AiModelInfo>()
 
+/** Gateway status from the official /health/detailed endpoint (works on every stock Hermes). */
+data class GatewayHealth(
+    val platform: String = "hermes-agent",
+    val version: String = "",
+    val gatewayState: String = "unknown",
+    val platformStates: List<Pair<String, String>> = emptyList(),
+    val diskUsedPercent: Float = 0f,
+    val diskFreeGb: Float = 0f,
+    val readinessOk: Boolean = true
+)
+
 data class TokenUsage(
     val inputTokens: Long = 0L,
     val outputTokens: Long = 0L,

@@ -36,6 +36,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import ee.oversight.hermes.ui.components.BiometricLockGate
 import ee.oversight.hermes.ui.components.SessionsDrawerContent
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
@@ -46,7 +47,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import ee.oversight.hermes.model.AppLanguage
 import ee.oversight.hermes.model.HermesStrings
 import ee.oversight.hermes.ui.components.CyberpunkTopBar
@@ -69,33 +69,40 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MainScreen(
-    viewModel: HermesViewModel = viewModel()
+    viewModel: HermesViewModel? = null
 ) {
-    val config by viewModel.config.collectAsState()
-    val status by viewModel.connectionStatus.collectAsState()
-    val telemetry by viewModel.telemetry.collectAsState()
-    val isSystemSupported by viewModel.telemetrySupported.collectAsState()
-    val chatMessages by viewModel.chatMessages.collectAsState()
-    val isStreaming by viewModel.isStreaming.collectAsState()
-    val selectedModel by viewModel.selectedModel.collectAsState()
-    val reasoningEffort by viewModel.reasoningEffort.collectAsState()
-    val activeTab by viewModel.activeTab.collectAsState()
-    val pingResult by viewModel.pingResult.collectAsState()
-    val isPinging by viewModel.isPinging.collectAsState()
-    val language by viewModel.appLanguage.collectAsState()
-    val discoveredGateway by viewModel.discoveredGateway.collectAsState()
-    val isDiscovering by viewModel.isDiscovering.collectAsState()
-    val sessions by viewModel.sessions.collectAsState()
-    val currentSessionId by viewModel.currentSessionId.collectAsState()
-    val availableModels by viewModel.availableModels.collectAsState()
-    val isLoadingSessions by viewModel.isLoadingSessions.collectAsState()
-    val appLogs by viewModel.appLogs.collectAsState()
-    val tokenUsage by viewModel.activeTokenUsage.collectAsState()
-    val pinnedSessionIds by viewModel.pinnedSessionIds.collectAsState()
-    val activeApprovalRequest by viewModel.activeApprovalRequest.collectAsState()
-    val globalAutoApprove by viewModel.globalAutoApprove.collectAsState()
-    val sessionAutoApproveIds by viewModel.sessionAutoApproveIds.collectAsState()
-    val queuedMessages by viewModel.queuedMessages.collectAsState()
+    // Application-scoped VM: survives activity destruction / backgrounding so a
+    // streaming reply keeps going when the user leaves the chat.
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as ee.oversight.hermes.HermesApp
+    val vm = viewModel ?: app.viewModel
+    val config by vm.config.collectAsState()
+    val status by vm.connectionStatus.collectAsState()
+    val telemetry by vm.telemetry.collectAsState()
+    val isSystemSupported by vm.telemetrySupported.collectAsState()
+    val gatewayHealth by vm.gatewayHealth.collectAsState()
+    val chatMessages by vm.chatMessages.collectAsState()
+    val isStreaming by vm.isStreaming.collectAsState()
+    val selectedModel by vm.selectedModel.collectAsState()
+    val reasoningEffort by vm.reasoningEffort.collectAsState()
+    val activeTab by vm.activeTab.collectAsState()
+    val pingResult by vm.pingResult.collectAsState()
+    val isPinging by vm.isPinging.collectAsState()
+    val language by vm.appLanguage.collectAsState()
+    val discoveredGateway by vm.discoveredGateway.collectAsState()
+    val isDiscovering by vm.isDiscovering.collectAsState()
+    val sessions by vm.sessions.collectAsState()
+    val currentSessionId by vm.currentSessionId.collectAsState()
+    val availableModels by vm.availableModels.collectAsState()
+    val isLoadingSessions by vm.isLoadingSessions.collectAsState()
+    val appLogs by vm.appLogs.collectAsState()
+    val tokenUsage by vm.activeTokenUsage.collectAsState()
+    val pinnedSessionIds by vm.pinnedSessionIds.collectAsState()
+    val activeApprovalRequest by vm.activeApprovalRequest.collectAsState()
+    val globalAutoApprove by vm.globalAutoApprove.collectAsState()
+    val sessionAutoApproveIds by vm.sessionAutoApproveIds.collectAsState()
+    val queuedMessages by vm.queuedMessages.collectAsState()
+    val needsBiometricUnlock by vm.needsBiometricUnlock.collectAsState()
+    val biometricLockEnabled by vm.biometricLockEnabled.collectAsState()
     val isSessionAutoApproved = currentSessionId != null && sessionAutoApproveIds.contains(currentSessionId)
     val currentSessionCost = sessions.find { it.id == currentSessionId }?.costUsd ?: 0.0
 
@@ -107,6 +114,7 @@ fun MainScreen(
     val isImeVisible = WindowInsets.isImeVisible
 
     CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+        Box(modifier = Modifier.fillMaxSize()) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             gesturesEnabled = true,
@@ -122,23 +130,23 @@ fun MainScreen(
                         isLoading = isLoadingSessions,
                         language = language,
                         pinnedSessionIds = pinnedSessionIds,
-                        onTogglePinSession = { id -> viewModel.togglePinSession(id) },
+                        onTogglePinSession = { id -> vm.togglePinSession(id) },
                         onSelectSession = { id ->
-                            viewModel.selectSession(id)
+                            vm.selectSession(id)
                             scope.launch { drawerState.close() }
                         },
                         onCreateNewSession = {
-                            viewModel.createNewSession()
+                            vm.createNewSession()
                             scope.launch { drawerState.close() }
                         },
                         onDeleteSession = { id ->
-                            viewModel.deleteSession(id)
+                            vm.deleteSession(id)
                         },
                         onExportSession = { id, title ->
-                            viewModel.exportSessionAsMarkdown(id, title, context)
+                            vm.exportSessionAsMarkdown(id, title, context)
                         },
                         onRefreshSessions = {
-                            viewModel.loadSessions()
+                            vm.loadSessions()
                         },
                         onClose = {
                             scope.launch { drawerState.close() }
@@ -165,16 +173,16 @@ fun MainScreen(
                         globalAutoApprove = globalAutoApprove,
                         isSessionAutoApproved = isSessionAutoApproved,
                         onToggleGlobalAutoApprove = { enabled ->
-                            viewModel.setGlobalAutoApprove(enabled)
+                            vm.setGlobalAutoApprove(enabled)
                         },
                         onTriggerTestApproval = {
-                            viewModel.triggerMockApproval()
+                            vm.triggerMockApproval()
                         },
                         onToggleConnection = { on ->
                             if (on) {
-                                viewModel.connectToSaved()
+                                vm.connectToSaved()
                             } else {
-                                viewModel.disconnectManual()
+                                vm.disconnectManual()
                             }
                         }
                     )
@@ -191,7 +199,7 @@ fun MainScreen(
                     val isChat = activeTab == AppTab.CHAT
                     NavigationBarItem(
                         selected = isChat,
-                        onClick = { viewModel.setActiveTab(AppTab.CHAT) },
+                        onClick = { vm.setActiveTab(AppTab.CHAT) },
                         icon = {
                             Icon(
                                 imageVector = if (isChat) Icons.Filled.Chat else Icons.Outlined.Chat,
@@ -222,7 +230,7 @@ fun MainScreen(
                     val isTerminal = activeTab == AppTab.TERMINAL
                     NavigationBarItem(
                         selected = isTerminal,
-                        onClick = { viewModel.setActiveTab(AppTab.TERMINAL) },
+                        onClick = { vm.setActiveTab(AppTab.TERMINAL) },
                         icon = {
                             Icon(
                                 imageVector = if (isTerminal) Icons.Filled.Terminal else Icons.Outlined.Terminal,
@@ -253,7 +261,7 @@ fun MainScreen(
                     val isTelemetry = activeTab == AppTab.TELEMETRY
                     NavigationBarItem(
                         selected = isTelemetry,
-                        onClick = { viewModel.setActiveTab(AppTab.TELEMETRY) },
+                        onClick = { vm.setActiveTab(AppTab.TELEMETRY) },
                         icon = {
                             Icon(
                                 imageVector = if (isTelemetry) Icons.Filled.MonitorHeart else Icons.Outlined.MonitorHeart,
@@ -284,7 +292,7 @@ fun MainScreen(
                     val isGateway = activeTab == AppTab.GATEWAY
                     NavigationBarItem(
                         selected = isGateway,
-                        onClick = { viewModel.setActiveTab(AppTab.GATEWAY) },
+                        onClick = { vm.setActiveTab(AppTab.GATEWAY) },
                         icon = {
                             Icon(
                                 imageVector = if (isGateway) Icons.Filled.Lan else Icons.Outlined.Lan,
@@ -332,26 +340,26 @@ fun MainScreen(
                             isLoadingSessions = isLoadingSessions,
                             config = config,
                             language = language,
-                            onSelectModel = { viewModel.selectModel(it) },
-                            onSelectSession = { viewModel.selectSession(it) },
-                            onCreateNewSession = { viewModel.createNewSession() },
-                            onRefreshSessions = { viewModel.loadSessions() },
-                            onSendMessage = { text, attachments -> viewModel.sendMessage(text, attachments) },
-                            onStopStreaming = { viewModel.stopStreaming() },
-                            onQueueMessage = { text, attachments -> viewModel.sendQueuedMessage(text, attachments) },
+                            onSelectModel = { vm.selectModel(it) },
+                            onSelectSession = { vm.selectSession(it) },
+                            onCreateNewSession = { vm.createNewSession() },
+                            onRefreshSessions = { vm.loadSessions() },
+                            onSendMessage = { text, attachments -> vm.sendMessage(text, attachments) },
+                            onStopStreaming = { vm.stopStreaming() },
+                            onQueueMessage = { text, attachments -> vm.sendQueuedMessage(text, attachments) },
                             reasoningEffort = reasoningEffort,
-                            onEffortSelected = { viewModel.setReasoningEffort(it) },
+                            onEffortSelected = { vm.setReasoningEffort(it) },
                             activeApprovalRequest = activeApprovalRequest,
                             onResolveApproval = { req, approved, mode ->
-                                viewModel.resolveApproval(req, approved, mode)
+                                vm.resolveApproval(req, approved, mode)
                             },
                             queuedMessageCount = queuedMessages.size,
-                            onCancelQueued = { viewModel.cancelQueued() }
+                            onCancelQueued = { vm.cancelQueued() }
                         )
                     }
                     AppTab.TERMINAL -> {
                         HermesTerminalScreen(
-                            viewModel = viewModel,
+                            viewModel = vm,
                             config = config,
                             status = status,
                             telemetry = telemetry,
@@ -362,10 +370,11 @@ fun MainScreen(
                     AppTab.TELEMETRY -> {
                         SystemMonitoringScreen(
                             telemetry = telemetry,
+                            gatewayHealth = gatewayHealth,
                             config = config,
                             language = language,
                             isSupported = isSystemSupported,
-                            onRefresh = { viewModel.testPing() }
+                            onRefresh = { vm.testPing() }
                         )
                     }
                     AppTab.GATEWAY -> {
@@ -376,36 +385,43 @@ fun MainScreen(
                             isPinging = isPinging,
                             language = language,
                             logs = appLogs,
-                            onRefreshLogs = { viewModel.refreshLogs() },
-                            onClearLogs = { viewModel.clearLogs() },
-                            savedProfiles = viewModel.getSavedProfileNames(),
-                            activeProfile = viewModel.getActiveProfileName(),
-                            onSaveProfile = { name -> viewModel.saveCurrentAsProfile(name) },
+                            onRefreshLogs = { vm.refreshLogs() },
+                            onClearLogs = { vm.clearLogs() },
+                            savedProfiles = vm.getSavedProfileNames(),
+                            activeProfile = vm.getActiveProfileName(),
+                            onSaveProfile = { name -> vm.saveCurrentAsProfile(name) },
                             onLoadProfile = { name ->
-                                viewModel.loadProfile(name)
-                                viewModel.connectToSaved()
+                                vm.loadProfile(name)
+                                vm.connectToSaved()
                             },
-                            onDeleteProfile = { name -> viewModel.deleteProfile(name) },
+                            onDeleteProfile = { name -> vm.deleteProfile(name) },
                             onToggleDeviceConnection = { name, connect ->
                                 if (connect) {
-                                    viewModel.loadProfile(name)
-                                    viewModel.connectToSaved()
+                                    vm.loadProfile(name)
+                                    vm.connectToSaved()
                                 } else {
-                                    viewModel.disconnectManual()
+                                    vm.disconnectManual()
                                 }
                             },
                             discoveredGateway = discoveredGateway,
                             isDiscovering = isDiscovering,
-                            onLanguageChange = { viewModel.setAppLanguage(it) },
-                            onSaveConfig = { viewModel.updateConnectionConfig(it) },
-                            onTestPing = { viewModel.testPing() },
-                            onStartAutoDiscovery = { viewModel.startAutoDiscovery() },
-                            onConnectDiscovered = { discovered, useTailscale -> viewModel.connectDiscovered(discovered, useTailscale) }
+                            onLanguageChange = { vm.setAppLanguage(it) },
+                            biometricLockEnabled = biometricLockEnabled,
+                            onToggleBiometricLock = { vm.setBiometricLockEnabled(it) },
+                            onSaveConfig = { vm.updateConnectionConfig(it) },
+                            onTestPing = { vm.testPing() },
+                            onStartAutoDiscovery = { vm.startAutoDiscovery() },
+                            onConnectDiscovered = { discovered, useTailscale -> vm.connectDiscovered(discovered, useTailscale) }
                         )
                     }
                 }
             }
         }
+        // Biometric lock gate overlays everything when app lock is enabled.
+        if (needsBiometricUnlock) {
+            BiometricLockGate(onUnlocked = { vm.onBiometricUnlocked() })
         }
+        } // end Box
+        } // end CompositionLocalProvider
     }
 }

@@ -5,8 +5,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <application
+        android:name=".HermesApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -26,6 +31,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Keeps the SSE stream alive when the app is backgrounded or the
+             screen is off. Started only while a reply is streaming. -->
+        <service
+            android:name=".service.StreamService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Stop button on the streaming notification; Approve/Deny buttons on
+             the approval notification (explicit component intents, no filters
+             needed for delivery, but declared actions keep the manifest honest) -->
+        <receiver
+            android:name=".service.StreamStopReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

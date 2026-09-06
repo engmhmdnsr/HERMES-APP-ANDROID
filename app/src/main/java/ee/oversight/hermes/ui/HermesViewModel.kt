@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ee.oversight.hermes.data.HermesAppLog
@@ -20,6 +21,7 @@ import ee.oversight.hermes.model.ChatMessage
 import ee.oversight.hermes.model.ConnectionConfig
 import ee.oversight.hermes.model.ConnectionStatus
 import ee.oversight.hermes.model.DiscoveredGateway
+import ee.oversight.hermes.model.GatewayHealth
 import ee.oversight.hermes.model.HermesSession
 import ee.oversight.hermes.model.MessageSender
 import ee.oversight.hermes.model.SystemTelemetry
@@ -33,6 +35,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.core.app.NotificationCompat
+import ee.oversight.hermes.HermesApp
+import ee.oversight.hermes.R
 
 enum class AppTab {
     CHAT,
@@ -53,6 +58,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _telemetry = MutableStateFlow(SystemTelemetry())
     val telemetry: StateFlow<SystemTelemetry> = _telemetry.asStateFlow()
+
+    private val _gatewayHealth = MutableStateFlow(GatewayHealth())
+    val gatewayHealth: StateFlow<GatewayHealth> = _gatewayHealth.asStateFlow()
 
     /** False when the connected server lacks /api/system (stock Hermes). */
     private val _telemetrySupported = MutableStateFlow(true)
@@ -137,6 +145,26 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _appLanguage = MutableStateFlow(prefsRepo.getAppLanguage())
     val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
+
+    // Biometric app lock
+    private val _biometricLockEnabled = MutableStateFlow(prefsRepo.isBiometricLockEnabled())
+    val biometricLockEnabled: StateFlow<Boolean> = _biometricLockEnabled.asStateFlow()
+
+    /** When true, the UI shows the biometric unlock gate over the whole app. */
+    private val _needsBiometricUnlock = MutableStateFlow(prefsRepo.isBiometricLockEnabled())
+    val needsBiometricUnlock: StateFlow<Boolean> = _needsBiometricUnlock.asStateFlow()
+
+    fun setBiometricLockEnabled(enabled: Boolean) {
+        prefsRepo.setBiometricLockEnabled(enabled)
+        _biometricLockEnabled.value = enabled
+        // Enabling locks immediately; disabling clears the lock state.
+        _needsBiometricUnlock.value = enabled
+        HermesAppLog.info(if (enabled) "Biometric lock enabled" else "Biometric lock disabled")
+    }
+
+    fun onBiometricUnlocked() {
+        _needsBiometricUnlock.value = false
+    }
 
     private val _discoveredGateway = MutableStateFlow<DiscoveredGateway?>(null)
     val discoveredGateway: StateFlow<DiscoveredGateway?> = _discoveredGateway.asStateFlow()
@@ -303,6 +331,105 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             streamingWakeLock?.let { if (it.isHeld) it.release() }
         } catch (_: Exception) { }
         streamingWakeLock = null
+    }
+
+    /**
+     * Start/stop the foreground StreamService to mirror streaming state.
+     * The service keeps the process alive in the background so a long reply
+     * finishes even when the user leaves the app.
+     */
+    private fun updateStreamService(running: Boolean) {
+        try {
+            val ctx = getApplication<Application>()
+            val intent = android.content.Intent(ctx, Class.forName("ee.oversight.hermes.service.StreamService"))
+            if (running) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ctx.startForegroundService(intent)
+                } else {
+                    ctx.startService(intent)
+                }
+                HermesAppLog.info("Foreground stream service started (reply continues in background)")
+            } else {
+                ctx.stopService(intent)
+            }
+        } catch (e: Exception) {
+            HermesAppLog.warn("Stream service toggle failed: ${e.message}")
+        }
+    }
+
+    /** Notification helpers (reply-done + approval actions). */
+    private fun notifyReplyDone(sessionId: String?) {
+        try {
+            val ctx = getApplication<Application>()
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            // Open the session that has the new reply
+            val openIntent = android.content.Intent(ctx, Class.forName("ee.oversight.hermes.MainActivity"))
+            openIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            openIntent.putExtra("open_session", sessionId)
+            val pi = android.app.PendingIntent.getActivity(
+                ctx, (sessionId?.hashCode() ?: 0), openIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            val notif = NotificationCompat.Builder(ctx, HermesApp.CHANNEL_REPLY)
+                .setSmallIcon(R.drawable.ic_stat_hermes)
+                .setContentTitle("Reply ready")
+                .setContentText("Hermes finished its reply")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build()
+            nm.notify(HermesApp.NOTIF_REPLY_ID, notif)
+        } catch (e: Exception) {
+            HermesAppLog.warn("Reply notification failed: ${e.message}")
+        }
+    }
+
+    /** Post an approval notification with Approve/Deny actions (Android 13 needs permission). */
+    private fun notifyApproval(request: ApprovalRequest) {
+        try {
+            val ctx = getApplication<Application>()
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            // Approve action -> same broadcast receiver, extra=approved:true
+            val approveIntent = android.content.Intent(ctx, Class.forName("ee.oversight.hermes.service.StreamStopReceiver"))
+                .setAction("ee.oversight.hermes.APPROVE")
+                .putExtra("run_id", request.runId)
+                .putExtra("approved", true)
+                .putExtra("session_id", request.sessionId)
+            val approvePi = android.app.PendingIntent.getBroadcast(
+                ctx, request.runId.hashCode(), approveIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            val denyIntent = android.content.Intent(ctx, Class.forName("ee.oversight.hermes.service.StreamStopReceiver"))
+                .setAction("ee.oversight.hermes.DENY")
+                .putExtra("run_id", request.runId)
+                .putExtra("approved", false)
+                .putExtra("session_id", request.sessionId)
+            val denyPi = android.app.PendingIntent.getBroadcast(
+                ctx, request.runId.hashCode() + 1, denyIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            val notif = NotificationCompat.Builder(ctx, HermesApp.CHANNEL_REPLY)
+                .setSmallIcon(R.drawable.ic_stat_hermes)
+                .setContentTitle("Hermes needs approval")
+                .setContentText(request.command.take(80))
+                .setStyle(NotificationCompat.BigTextStyle().bigText("${request.reason}\n\n${request.command}"))
+                .setAutoCancel(true)
+                .addAction(0, "Approve", approvePi)
+                .addAction(0, "Deny", denyPi)
+                .build()
+            nm.notify(request.runId.hashCode(), notif)
+        } catch (e: Exception) {
+            HermesAppLog.warn("Approval notification failed: ${e.message}")
+        }
+    }
+
+    /** Whether notification permission is granted (Android 13+). */
+    private fun canPostNotifications(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                val ctx = getApplication<Application>()
+                ctx.checkSelfPermission("android.permission.POST_NOTIFICATIONS") == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else true
+        } catch (_: Exception) { true }
     }
 
     init {
@@ -472,6 +599,13 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     if (lastSessionsRefresh >= 2) { // ~every 30s (15s poll)
                         lastSessionsRefresh = 0
                         loadSessions()
+                    }
+                    // Refresh gateway health status (official endpoint, works on
+                    // every stock server) — powers the System tab.
+                    viewModelScope.launch {
+                        networkClient.fetchGatewayHealth(cfg).onSuccess { health ->
+                            _gatewayHealth.value = health
+                        }
                     }
                 } else {
                     // While the screen is off or turned off mid-ping, don't count failure.
@@ -1056,6 +1190,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         updateSessionMessages(streamSessionId) { it + userMessage + agentInitialMessage }
         _isStreaming.value = true
         acquireStreamingWakeLock()
+        updateStreamService(true)
         HermesAppLog.info("Sending to session ${streamSessionId ?: "?"} [${_selectedModel.value.id}]${if (attachments.isNotEmpty()) " + ${attachments.size} attachment(s)" else ""}")
 
         streamingJob?.cancel()
@@ -1153,6 +1288,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                                 } else {
                                     HermesAppLog.info("Interactive approval requested: ${req.command}")
                                     _activeApprovalRequest.value = req
+                                    if (canPostNotifications()) notifyApproval(req)
                                 }
                             }
                             is StreamChunk.Usage -> {
@@ -1230,6 +1366,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             }
             _isStreaming.value = false
             releaseStreamingWakeLock()
+            // If queued messages remain, doSendMessage below restarts it.
+            updateStreamService(false)
+            if (canPostNotifications()) notifyReplyDone(streamSessionId)
 
             // Auto-send anything queued while the previous run was in progress.
             val queued = _queuedMessages.value
@@ -1246,11 +1385,39 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Called from the approval notification's Approve/Deny buttons. */
+    fun resolveApprovalFromNotification(runId: String?, approved: Boolean, sessionId: String?) {
+        if (runId == null) return
+        viewModelScope.launch {
+            try {
+                networkClient.submitApproval(
+                    config = _config.value,
+                    runId = runId,
+                    approved = approved,
+                    sessionId = sessionId
+                )
+                HermesAppLog.info("Approval from notification: ${if (approved) "APPROVED" else "DENIED"} ($runId)")
+                // Cancel the notification
+                try {
+                    val nm = getApplication<Application>().getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    nm.cancel(runId.hashCode())
+                } catch (_: Exception) {}
+                // If the approval card is showing this request, dismiss it.
+                val current = _activeApprovalRequest.value
+                if (current?.runId == runId) _activeApprovalRequest.value = null
+            } catch (e: Exception) {
+                HermesAppLog.error("Approval from notification failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Called from the approval notification's Approve/Deny buttons. */
     fun stopStreaming(clearQueue: Boolean = false) {
         if (clearQueue) _queuedMessages.value = emptyList()
         streamingJob?.cancel()
         _isStreaming.value = false
         releaseStreamingWakeLock()
+        updateStreamService(false)
         updateSessionMessages(_currentSessionId.value) { list ->
             list.map { msg ->
                 if (msg.isStreaming) msg.copy(isStreaming = false) else msg

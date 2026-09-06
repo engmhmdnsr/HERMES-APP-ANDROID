@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DeveloperBoard
 import androidx.compose.material.icons.filled.Refresh
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ee.oversight.hermes.model.AppLanguage
 import ee.oversight.hermes.model.ConnectionConfig
+import ee.oversight.hermes.model.GatewayHealth
 import ee.oversight.hermes.model.HermesStrings
 import ee.oversight.hermes.model.ProcessInfo
 import ee.oversight.hermes.model.SystemTelemetry
@@ -50,6 +52,7 @@ import ee.oversight.hermes.ui.theme.MonospaceStyle
 import ee.oversight.hermes.ui.theme.NeonAmber
 import ee.oversight.hermes.ui.theme.NeonCyan
 import ee.oversight.hermes.ui.theme.NeonGreen
+import ee.oversight.hermes.ui.theme.NeonRed
 import ee.oversight.hermes.ui.theme.NeonViolet
 import ee.oversight.hermes.ui.theme.NeonVioletLight
 import ee.oversight.hermes.ui.theme.TextPrimary
@@ -58,6 +61,7 @@ import ee.oversight.hermes.ui.theme.TextSecondary
 @Composable
 fun SystemMonitoringScreen(
     telemetry: SystemTelemetry,
+    gatewayHealth: GatewayHealth = GatewayHealth(),
     config: ConnectionConfig,
     language: AppLanguage,
     isSupported: Boolean = true,
@@ -108,6 +112,89 @@ fun SystemMonitoringScreen(
                 }
             }
         }
+
+        // Gateway status card (official /health/detailed — works on every server)
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(CyberSurfaceElevated)
+                    .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(12.dp))
+                    .padding(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Bolt, null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (language == AppLanguage.AR) "حالة البوابة" else "GATEWAY STATUS",
+                        style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    // Readiness dot
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (gatewayHealth.readinessOk) NeonGreen else NeonRed)
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                val connectedPlatforms = gatewayHealth.platformStates.count { it.second == "connected" }
+                Text(
+                    text = if (language == AppLanguage.AR)
+                        "الحالة: ${gatewayHealth.gatewayState}  ·  المنصات المتصلة: $connectedPlatforms/${gatewayHealth.platformStates.size}"
+                    else
+                        "State: ${gatewayHealth.gatewayState}  ·  Connected platforms: $connectedPlatforms/${gatewayHealth.platformStates.size}",
+                    style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary)
+                )
+                if (gatewayHealth.version.isNotBlank()) {
+                    Text(
+                        text = "Hermes ${gatewayHealth.version}  ·  ${gatewayHealth.platform}",
+                        style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.7f))
+                    )
+                }
+                if (gatewayHealth.diskUsedPercent > 0f) {
+                    Text(
+                        text = if (language == AppLanguage.AR)
+                            "القرص: مستخدم ${String.format(java.util.Locale.US, "%.1f", gatewayHealth.diskUsedPercent)}%  ·  متاح ${String.format(java.util.Locale.US, "%.1f", gatewayHealth.diskFreeGb)} GB"
+                        else
+                            "Disk: ${String.format(java.util.Locale.US, "%.1f", gatewayHealth.diskUsedPercent)}% used  ·  ${String.format(java.util.Locale.US, "%.1f", gatewayHealth.diskFreeGb)} GB free",
+                        style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.7f))
+                    )
+                }
+                if (gatewayHealth.platformStates.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    gatewayHealth.platformStates.forEach { (name, state) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        when (state) {
+                                            "connected" -> NeonGreen
+                                            "connecting", "starting" -> NeonAmber
+                                            else -> NeonRed
+                                        }
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = name,
+                                style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text(
+                                text = state,
+                                style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.8f))
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Section Header
         item {
             Row(

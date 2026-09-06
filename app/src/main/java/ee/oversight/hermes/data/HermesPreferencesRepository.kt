@@ -45,6 +45,13 @@ class HermesPreferencesRepository(context: Context) {
         private const val KEY_ACTIVE_PROFILE = "pref_active_profile"
         private const val KEY_PINNED_SESSIONS = "pref_pinned_sessions"
         private const val KEY_GLOBAL_AUTO_APPROVE = "pref_global_auto_approve"
+        private const val KEY_BIOMETRIC_LOCK = "pref_biometric_lock"
+    }
+
+    fun isBiometricLockEnabled(): Boolean = prefs.getBoolean(KEY_BIOMETRIC_LOCK, false)
+
+    fun setBiometricLockEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_BIOMETRIC_LOCK, enabled).apply()
     }
 
     fun getAppLanguage(): AppLanguage {
