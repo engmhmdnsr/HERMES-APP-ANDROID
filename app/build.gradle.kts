@@ -23,18 +23,26 @@ android {
 
   signingConfigs {
     create("release") {
-      // Look for the keystore and credentials from env var, or local credentials file if present
+      // Keystore + credentials live OUTSIDE the repo (secure home dir).
+      // Fall back to repo-root copies for fresh checkouts on other machines.
       val creds = Properties()
-      val credsFile = file("${rootDir}/keystore-credentials.txt")
+      val homeCreds = file("${System.getProperty("user.home")}/AppData/Local/hermes/android-keystore/keystore-credentials.txt")
+      val rootCreds = file("${rootDir}/keystore-credentials.txt")
+      val credsFile = when {
+        homeCreds.exists() -> homeCreds
+        rootCreds.exists() -> rootCreds
+        else -> rootCreds
+      }
       if (credsFile.exists()) {
         FileInputStream(credsFile).use { creds.load(it) }
       }
+      val homeKeystore = file("${System.getProperty("user.home")}/AppData/Local/hermes/android-keystore/hermes-control-release.jks")
       val localKeystore = file("${rootDir}/hermes-control-release.jks")
       val envPath = System.getenv("KEYSTORE_PATH")
-      storeFile = if (!envPath.isNullOrBlank() && file(envPath).exists()) {
-        file(envPath)
-      } else {
-        localKeystore
+      storeFile = when {
+        !envPath.isNullOrBlank() && file(envPath).exists() -> file(envPath)
+        homeKeystore.exists() -> homeKeystore
+        else -> localKeystore
       }
       storePassword = System.getenv("STORE_PASSWORD") ?: creds.getProperty("STORE_PASSWORD") ?: ""
       keyAlias = System.getenv("KEY_ALIAS") ?: creds.getProperty("KEY_ALIAS") ?: "upload"

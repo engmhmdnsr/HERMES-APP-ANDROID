@@ -23,3 +23,4 @@ keystore-credentials.txt
 # Local screenshots / WhatsApp mockups (never commit)
 *.jpeg
 WhatsApp Image *.jpeg
+docs/screenshots/

@@ -8,6 +8,18 @@ This app talks to the **official Hermes API server** built into Hermes Agent (th
 
 ---
 
+## Screenshots
+
+*(Add real device screenshots here before publishing: chat streaming, gateway setup, system telemetry.)*
+
+| Chat | Gateway | Telemetry |
+|------|---------|-----------|
+| ![](docs/screenshots/chat.png) | ![](docs/screenshots/gateway.png) | ![](docs/screenshots/telemetry.png) |
+
+> Place PNGs under `docs/screenshots/` (gitignored until you add real ones).
+
+---
+
 ## Architecture (v4 - official API server)
 
 ```
