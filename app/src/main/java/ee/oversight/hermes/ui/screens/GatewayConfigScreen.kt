@@ -848,6 +848,10 @@ fun GatewayConfigScreen(
                     text = "Mohamed Nasr",
                     style = MonospaceStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary)
                 )
+                Text(
+                    text = "Oversight EE",
+                    style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = NeonCyan)
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))

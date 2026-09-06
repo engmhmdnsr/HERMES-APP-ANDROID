@@ -6,6 +6,8 @@ Mobile control center for **Hermes Agent** running on a Windows PC, reached secu
 
 This app talks to the **official Hermes API server** built into Hermes Agent (the `api_server` gateway platform) — no custom FastAPI shim required.
 
+**License & third-party note:** This app is MIT-licensed by Mohamed Nasr / Oversight EE. It is an independent client for [Hermes Agent](https://github.com/NousResearch/hermes-agent), which is itself MIT-licensed (Copyright (c) 2025 Nous Research). The app contains no Hermes source code — it talks to a user's own Hermes instance over its public HTTP API. "Hermes" is an open-source project name; this app is not an official Nous Research product.
+
 ---
 
 ## Screenshots
