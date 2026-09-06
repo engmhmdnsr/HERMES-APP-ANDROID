@@ -54,6 +54,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _telemetry = MutableStateFlow(SystemTelemetry())
     val telemetry: StateFlow<SystemTelemetry> = _telemetry.asStateFlow()
 
+    /** False when the connected server lacks /api/system (stock Hermes). */
+    private val _telemetrySupported = MutableStateFlow(true)
+    val telemetrySupported: StateFlow<Boolean> = _telemetrySupported.asStateFlow()
+
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
 
@@ -103,7 +107,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private val _selectedModel = MutableStateFlow(
-        AvailableAiModels.find { it.id == prefsRepo.getSelectedModelId() } ?: AvailableAiModels.first()
+        AvailableAiModels.find { it.id == prefsRepo.getSelectedModelId() }
+            ?: AvailableAiModels.firstOrNull()
+            ?: AiModelInfo(id = "", displayName = "No model", provider = "", description = "")
     )
     val selectedModel: StateFlow<AiModelInfo> = _selectedModel.asStateFlow()
 
@@ -120,7 +126,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         HermesAppLog.info("Reasoning effort set to: $normalized")
     }
 
-    private val _activeTab = MutableStateFlow(AppTab.CHAT)
+    private val _activeTab = MutableStateFlow(if (prefsRepo.getConnectionConfig().tailscaleIp.isBlank()) AppTab.GATEWAY else AppTab.CHAT)
     val activeTab: StateFlow<AppTab> = _activeTab.asStateFlow()
 
     private val _pingResult = MutableStateFlow<PingResult?>(null)
@@ -515,8 +521,16 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     result.getOrNull()?.let { newMetrics ->
                         _telemetry.value = newMetrics
                     }
+                    _telemetrySupported.value = true
                     consecutiveFailures = 0
                 } else {
+                    val is404 = result.exceptionOrNull()?.message?.contains("404") == true
+                    if (is404) {
+                        // Server doesn't expose /api/system (stock Hermes) — stop
+                        // polling and tell the UI so it can show a clear message.
+                        _telemetrySupported.value = false
+                        break
+                    }
                     consecutiveFailures++
                     // Telemetry is best-effort: a failing /api/system (e.g. old
                     // server without the endpoint) must NEVER flip the app to

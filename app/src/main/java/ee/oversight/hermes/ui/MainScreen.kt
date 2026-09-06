@@ -74,6 +74,7 @@ fun MainScreen(
     val config by viewModel.config.collectAsState()
     val status by viewModel.connectionStatus.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
+    val isSystemSupported by viewModel.telemetrySupported.collectAsState()
     val chatMessages by viewModel.chatMessages.collectAsState()
     val isStreaming by viewModel.isStreaming.collectAsState()
     val selectedModel by viewModel.selectedModel.collectAsState()
@@ -363,6 +364,7 @@ fun MainScreen(
                             telemetry = telemetry,
                             config = config,
                             language = language,
+                            isSupported = isSystemSupported,
                             onRefresh = { viewModel.testPing() }
                         )
                     }

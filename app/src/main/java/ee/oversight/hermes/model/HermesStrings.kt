@@ -92,13 +92,13 @@ object HermesStrings {
     fun welcomeMessage(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> """
 مرحباً بك في مركز التحكم **Hermes Control Center** ⚡
-الوكيل الذكي جاهز على نظام Windows 11 عبر نفق Tailscale المشفر.
+الوكيل الذكي جاهز عبر نفق Tailscale المشفر.
 
 يمكنك إرسال استفسارات، تشغيل أوامر النظام، ومراقبة الـ CPU والذاكرة مباشرة. جرّب أحد الأوامر الجاهزة بالأسفل لاختبار بث الـ SSE وصناديق التنفيذ البرمجية.
         """.trimIndent()
         AppLanguage.EN -> """
 Welcome to **Hermes Control Center** ⚡
-Your Windows 11 AI agent is connected via a secure, encrypted Tailscale tunnel.
+Your AI agent is connected via a secure, encrypted Tailscale tunnel.
 
 You can send instructions, execute system commands, and monitor CPU and memory in real time. Try one of the preset prompts below to test SSE streaming and tool execution blocks.
         """.trimIndent()
@@ -112,8 +112,8 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.EN -> "SYSTEM & GATEWAY METRICS"
     }
     fun metricsSubtitleLive(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "تم الاستعلام مباشرة من مضيف Windows 11"
-        AppLanguage.EN -> "Polled from Windows 11 host"
+        AppLanguage.AR -> "تم الاستعلام مباشرة من مضيف Hermes"
+        AppLanguage.EN -> "Polled from the Hermes host"
     }
     fun pollButton(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "تحديث"
@@ -140,8 +140,8 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.EN -> "${String.format("%.1f", freeGb)} GB Free"
     }
     fun hostSpecsTitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "بيانات مضيف WINDOWS 11"
-        AppLanguage.EN -> "WINDOWS 11 HOST TELEMETRY"
+        AppLanguage.AR -> "بيانات مضيف HERMES"
+        AppLanguage.EN -> "HERMES HOST TELEMETRY"
     }
     fun hostnameLabel(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "اسم الجهاز:"
@@ -206,8 +206,8 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.EN -> "TAILSCALE SECURE GATEWAY"
     }
     fun gatewaySubtitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "اتصال مشفر ومباشر بين الهاتف وكمبيوتر Windows 11"
-        AppLanguage.EN -> "Peer-to-peer encrypted connection between Mobile & Windows 11"
+        AppLanguage.AR -> "اتصال مشفر ومباشر بين الهاتف ومضيف Hermes"
+        AppLanguage.EN -> "Peer-to-peer encrypted connection between Mobile & your Hermes host"
     }
 
     // Language Section
@@ -307,7 +307,7 @@ You can send instructions, execute system commands, and monitor CPU and memory i
     // Auto-Discovery & QR Strings
     fun autoDiscoverTitle(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "الاكتشاف التلقائي لجهازك"
-        AppLanguage.EN -> "AUTO-DISCOVER WINDOWS PC"
+        AppLanguage.EN -> "AUTO-DISCOVER YOUR GATEWAY"
     }
     fun autoDiscoverSearching(lang: AppLanguage) = when (lang) {
         AppLanguage.AR -> "جاري البحث عن سيرفر هيرمز على الشبكة المحلية..."
@@ -352,8 +352,8 @@ You can send instructions, execute system commands, and monitor CPU and memory i
         AppLanguage.EN -> "Command copied to clipboard"
     }
     fun toolExecuting(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "جاري التنفيذ على مضيف Windows 11..."
-        AppLanguage.EN -> "Executing on Windows 11 host..."
+        AppLanguage.AR -> "جاري التنفيذ على مضيف Hermes..."
+        AppLanguage.EN -> "Executing on the Hermes host..."
     }
 
     // Telemetry extras

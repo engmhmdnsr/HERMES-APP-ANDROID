@@ -142,7 +142,7 @@ class HermesPreferencesRepository(context: Context) {
     }
 
     fun getSelectedModelId(): String {
-        return prefs.getString(KEY_MODEL, "deepseek/deepseek-v4-flash") ?: "deepseek/deepseek-v4-flash"
+        return prefs.getString(KEY_MODEL, "") ?: ""
     }
 
     fun saveSelectedModelId(modelId: String) {

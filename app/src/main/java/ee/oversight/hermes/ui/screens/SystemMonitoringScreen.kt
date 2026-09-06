@@ -45,6 +45,7 @@ import ee.oversight.hermes.ui.components.SystemMetricCircularCard
 import ee.oversight.hermes.ui.theme.CyberBg
 import ee.oversight.hermes.ui.theme.CyberSurface
 import ee.oversight.hermes.ui.theme.CyberSurfaceBorder
+import ee.oversight.hermes.ui.theme.CyberSurfaceElevated
 import ee.oversight.hermes.ui.theme.MonospaceStyle
 import ee.oversight.hermes.ui.theme.NeonAmber
 import ee.oversight.hermes.ui.theme.NeonCyan
@@ -59,6 +60,7 @@ fun SystemMonitoringScreen(
     telemetry: SystemTelemetry,
     config: ConnectionConfig,
     language: AppLanguage,
+    isSupported: Boolean = true,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -70,6 +72,42 @@ fun SystemMonitoringScreen(
         contentPadding = PaddingValues(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Server doesn't expose /api/system (stock Hermes install) — explain
+        // instead of showing all-zero gauges.
+        if (!isSupported) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(CyberSurfaceElevated)
+                        .border(1.dp, NeonViolet.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "📡",
+                        style = MonospaceStyle.copy(fontSize = 30.sp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = if (language == AppLanguage.AR)
+                            "هذا الخادم لا يدعم مراقبة النظام"
+                        else
+                            "This server doesn't support system monitoring",
+                        style = MonospaceStyle.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (language == AppLanguage.AR)
+                            "خادم Hermes المتصل لا يوفّر نقطة /api/system. حدّث Hermes على جهازك أو تواصل مع مشغّل الخادم."
+                        else
+                            "The connected Hermes server doesn't expose /api/system. Update Hermes on your machine or contact the server operator.",
+                        style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary, lineHeight = 17.sp)
+                    )
+                }
+            }
+        }
         // Section Header
         item {
             Row(
@@ -169,9 +207,9 @@ fun SystemMonitoringScreen(
             CpuHistorySparkline(history = telemetry.cpuHistory)
         }
 
-        // Windows 11 Host Specs Card
+        // Hermes Host Specs Card
         item {
-            Windows11HostCard(
+            HermesHostCard(
                 telemetry = telemetry,
                 tailscaleIp = config.tailscaleIp,
                 language = language
@@ -202,7 +240,7 @@ fun SystemMonitoringScreen(
 }
 
 @Composable
-fun Windows11HostCard(
+fun HermesHostCard(
     telemetry: SystemTelemetry,
     tailscaleIp: String,
     language: AppLanguage,

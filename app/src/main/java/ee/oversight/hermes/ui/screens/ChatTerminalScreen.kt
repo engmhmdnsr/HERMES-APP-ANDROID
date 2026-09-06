@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import android.app.Activity
 import android.content.Intent
@@ -68,6 +69,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -89,6 +91,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -311,6 +314,38 @@ fun ChatTerminalScreen(
                 .weight(1f)
                 .fillMaxWidth()
         ) {
+            if (config.tailscaleIp.isBlank()) {
+                // First-run onboarding: no gateway configured yet — guide the user
+                // to the Gateway tab instead of showing an empty chat.
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "🚀",
+                        style = MonospaceStyle.copy(fontSize = 40.sp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = if (language == AppLanguage.AR)
+                            "مرحباً بك في Hermes Control!"
+                        else
+                            "Welcome to Hermes Control!",
+                        style = MonospaceStyle.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold, color = NeonCyan)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = if (language == AppLanguage.AR)
+                            "لم يتم إعداد الاتصال بعد.\n\nاذهب إلى تبويب Gateway وأدخل:\n• عنوان IP الخاص بـ Hermes (مثل 100.x.x.x)\n• المنفذ (افتراضياً 8080)\n• مفتاح API_SERVER_KEY من ملف .env على جهازك\n\nبعد الحفظ اضغط اتصال (Connect) وسيبدأ الشات."
+                        else
+                            "No gateway configured yet.\n\nGo to the Gateway tab and enter:\n• Your Hermes PC IP (e.g. 100.x.x.x)\n• The port (default 8080)\n• The API_SERVER_KEY from your .env file\n\nThen tap Connect and chat will start working.",
+                        style = MonospaceStyle.copy(fontSize = 13.sp, color = TextSecondary, lineHeight = 21.sp)
+                    )
+                }
+            } else {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -323,6 +358,7 @@ fun ChatTerminalScreen(
                     ChatMessageItem(message = message, language = language)
                 }
             }
+            } // end else (config set)
 
             // Floating Scroll-To-Bottom Button
             val canScrollDown = remember {
@@ -882,6 +918,10 @@ fun ModelsSelectionBottomSheet(
 
 @Composable
 fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
+    // Chat bubbles always use LTR layout (like WhatsApp/Telegram): the user's
+    // message stays on the RIGHT and the agent's on the LEFT regardless of the
+    // app language. Arabic text inside each bubble still renders RTL via bidi.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
     val formattedTime = remember(message.timestamp) { timeFormat.format(Date(message.timestamp)) }
 
@@ -1112,6 +1152,7 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
             }
         }
     }
+    } // end CompositionLocalProvider(Ltr)
 }
 
 @Composable

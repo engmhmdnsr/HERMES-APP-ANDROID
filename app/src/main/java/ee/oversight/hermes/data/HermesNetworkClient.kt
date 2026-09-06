@@ -243,8 +243,8 @@ class HermesNetworkClient {
                     gpuName = json.optJSONObject("gpu")?.optString("name", "") ?: "",
                     diskUsedGb = json.optJSONObject("disk")?.optDouble("used_gb", 0.0)?.toFloat() ?: 0f,
                     diskTotalGb = json.optJSONObject("disk")?.optDouble("total_gb", 0.0)?.toFloat() ?: 0f,
-                    hostname = json.optJSONObject("host")?.optString("hostname", "WINDOWS-PC") ?: json.optString("hostname", "WINDOWS-PC"),
-                    osVersion = json.optJSONObject("host")?.optString("os", "Windows") ?: json.optString("os_version", "Windows"),
+                    hostname = json.optJSONObject("host")?.optString("hostname", "") ?: json.optString("hostname", ""),
+                    osVersion = json.optJSONObject("host")?.optString("os", "") ?: json.optString("os_version", ""),
                     uptime = json.optString("uptime", ""),
                     agentVersion = json.optString("agent_version", ""),
                     activeTasksCount = json.optInt("active_tasks_count", 0),
@@ -476,8 +476,7 @@ class HermesNetworkClient {
                                 id = modelId,
                                 displayName = clean,
                                 provider = displayName,
-                                description = "$displayName: $modelId",
-                                isDefault = modelId == "deepseek/deepseek-v4-flash"
+                                description = "$displayName: $modelId"
                             )
                         )
                     }

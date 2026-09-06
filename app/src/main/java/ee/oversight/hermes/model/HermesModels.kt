@@ -54,8 +54,8 @@ data class SystemTelemetry(
     val gpuName: String = "",
     val diskUsedGb: Float = 0f,
     val diskTotalGb: Float = 0f,
-    val hostname: String = "WINDOWS-11-PC",
-    val osVersion: String = "Windows 11",
+    val hostname: String = "",
+    val osVersion: String = "",
     val uptime: String = "",
     val agentVersion: String = "",
     val activeTasksCount: Int = 0,
@@ -131,15 +131,10 @@ data class AiModelInfo(
 )
 
 // Placeholder list, replaced by live /api/model/options once connected.
-val AvailableAiModels = listOf(
-    AiModelInfo(
-        id = "deepseek/deepseek-v4-flash",
-        displayName = "DeepSeek V4 Flash",
-        provider = "CommandCode",
-        description = "Default fast agent model",
-        isDefault = true
-    )
-)
+// Empty on purpose: a fresh user's server may not have any specific model,
+// so we never assume a hardcoded default. The UI shows "No model selected"
+// until the live catalog loads.
+val AvailableAiModels = emptyList<AiModelInfo>()
 
 data class TokenUsage(
     val inputTokens: Long = 0L,
