@@ -74,7 +74,17 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all { test ->
+        // Roborazzi screenshot tests need a local graphics environment — they
+        // run on dev machines but are excluded on CI (GitHub runner has no
+        // native graphics stack for Robolectric NATIVE graphics mode).
+        test.exclude("**/*ScreenshotTest*")
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
