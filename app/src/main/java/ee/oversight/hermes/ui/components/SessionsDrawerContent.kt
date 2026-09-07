@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,7 +31,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -53,6 +53,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -106,6 +107,7 @@ enum class SessionSortOrder {
     MOST_TOKENS
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsDrawerContent(
     sessions: List<HermesSession>,
@@ -248,8 +250,8 @@ fun SessionsDrawerContent(
                         )
                     } else {
                         Icon(
-                            imageVector = Icons.Default.AccountTree,
-                            contentDescription = "Refresh / Branches",
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh sessions",
                             tint = Color(0xFFBAC7D5),
                             modifier = Modifier.size(20.dp)
                         )
@@ -563,28 +565,31 @@ fun SessionsDrawerContent(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Sessions List
-        if (displaySessions.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = if (searchQuery.isNotBlank())
-                        (if (language == AppLanguage.AR) "لا توجد جلسات تطابق البحث" else "No matching sessions")
-                    else
-                        (if (language == AppLanguage.AR) "لا توجد جلسات هنا" else "No sessions here"),
-                    style = MonospaceStyle.copy(fontSize = 13.sp, color = Color(0xFF6B788A))
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+        // Sessions List (pull down to refresh)
+        PullToRefreshBox(
+            isRefreshing = isLoading,
+            onRefresh = onRefreshSessions,
+            modifier = Modifier.weight(1f)
+        ) {
+            if (displaySessions.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (searchQuery.isNotBlank())
+                            (if (language == AppLanguage.AR) "لا توجد جلسات تطابق البحث" else "No matching sessions")
+                        else
+                            (if (language == AppLanguage.AR) "لا توجد جلسات هنا" else "No sessions here"),
+                        style = MonospaceStyle.copy(fontSize = 13.sp, color = Color(0xFF6B788A))
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                 items(displaySessions, key = { it.id }) { s ->
                     val isCurrent = s.id == currentSessionId
                     val isPinned = pinnedSessionIds.contains(s.id) || s.isPinned
@@ -803,8 +808,9 @@ fun SessionsDrawerContent(
                         }
                     }
                 }
-            }
-        }
+            } // close LazyColumn
+            } // close else (sessions list)
+        } // close PullToRefreshBox
 
         // Delete Confirmation Dialog
         if (sessionToDelete != null) {
