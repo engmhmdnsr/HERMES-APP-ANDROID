@@ -118,6 +118,7 @@ import ee.oversight.hermes.model.HermesSession
 import ee.oversight.hermes.model.HermesStrings
 import ee.oversight.hermes.model.MessageSender
 import ee.oversight.hermes.ui.components.InteractiveApprovalCard
+import ee.oversight.hermes.ui.components.TtsSpeaker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1135,6 +1136,10 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                 Spacer(modifier = Modifier.weight(1f))
                 val clipboardManager = LocalClipboardManager.current
                 val ctx = LocalContext.current
+                // Speak the reply aloud (device TTS). Only for finished replies.
+                if (!message.isStreaming && message.content.isNotBlank() && message.sender == MessageSender.HERMES) {
+                    TtsSpeaker(text = message.content, modifier = Modifier.padding(end = 2.dp))
+                }
                 IconButton(
                     onClick = {
                         clipboardManager.setText(AnnotatedString(message.content))

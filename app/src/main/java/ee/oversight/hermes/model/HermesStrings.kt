@@ -43,6 +43,56 @@ object HermesStrings {
         AppLanguage.AR -> "الإعدادات"
         AppLanguage.EN -> "SETTINGS"
     }
+    fun tabJobs(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "المهام"
+        AppLanguage.EN -> "JOBS"
+    }
+
+    // Jobs Screen
+    fun jobsEmptyTitle(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "لا توجد مهام مجدولة"
+        AppLanguage.EN -> "NO SCHEDULED JOBS"
+    }
+    fun jobsEmptyDesc(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "أنشئ مهمة ليعمل Hermes تلقائيًا في وقت محدد"
+        AppLanguage.EN -> "Create a job and Hermes will run it automatically on a schedule"
+    }
+    fun jobsCreateNew(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "+ مهمة جديدة"
+        AppLanguage.EN -> "+ NEW JOB"
+    }
+    fun jobsScheduleLabel(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "الجدولة"
+        AppLanguage.EN -> "SCHEDULE"
+    }
+    fun jobsNextRun(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "التشغيل القادم"
+        AppLanguage.EN -> "NEXT RUN"
+    }
+    fun jobsLastRun(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "آخر تشغيل"
+        AppLanguage.EN -> "LAST RUN"
+    }
+    fun jobsPromptLabel(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "الأمر (Prompt)"
+        AppLanguage.EN -> "PROMPT"
+    }
+    fun jobsJobNameLabel(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "اسم المهمة"
+        AppLanguage.EN -> "Job name"
+    }
+    fun jobsScheduleHint(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "مثال: every 1h / 0 9 * * * / كل يوم 8 ص"
+        AppLanguage.EN -> "e.g. every 1h | 0 9 * * * | every monday 9am"
+    }
+    fun jobsEnabled(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "مفعّلة"
+        AppLanguage.EN -> "ENABLED"
+    }
+    fun jobsPaused(lang: AppLanguage) = when (lang) {
+        AppLanguage.AR -> "موقوفة"
+        AppLanguage.EN -> "PAUSED"
+    }
 
     // Chat Screen
     fun modelLabel(lang: AppLanguage) = when (lang) {

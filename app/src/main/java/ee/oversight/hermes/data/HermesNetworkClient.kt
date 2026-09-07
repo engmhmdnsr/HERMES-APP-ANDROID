@@ -3,6 +3,7 @@ package ee.oversight.hermes.data
 import ee.oversight.hermes.model.AiModelInfo
 import ee.oversight.hermes.model.ChatMessage
 import ee.oversight.hermes.model.ConnectionConfig
+import ee.oversight.hermes.model.CronJob
 import ee.oversight.hermes.model.DiscoveredGateway
 import ee.oversight.hermes.model.GatewayHealth
 import ee.oversight.hermes.model.HermesSession
@@ -448,6 +449,56 @@ class HermesNetworkClient {
     }
 
     // ------------------------------------------------------------------
+    // Rename session: PATCH /api/sessions/{id}  {"title": "..."}
+    // ------------------------------------------------------------------
+    suspend fun renameSession(config: ConnectionConfig, sessionId: String, newTitle: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/sessions/$sessionId"
+            val payload = JSONObject().put("title", newTitle)
+            val body = payload.toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).authHeaders(config).patch(body).build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) Result.success(true)
+                else Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Fork session: POST /api/sessions/{id}/fork  ({} body)
+    // Returns the new forked session.
+    // ------------------------------------------------------------------
+    suspend fun forkSession(config: ConnectionConfig, sessionId: String): Result<HermesSession> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/sessions/$sessionId/fork"
+            val body = "{}".toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).authHeaders(config).post(body).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@use Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val json = JSONObject(bodyStr)
+                val sessionObj = json.optJSONObject("session") ?: json
+                val session = HermesSession(
+                    id = sessionObj.getString("id"),
+                    title = cleanSessionTitle(sessionObj.optString("title")),
+                    model = sessionObj.optString("model", "default"),
+                    startedAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis(),
+                    messageCount = sessionObj.optInt("message_count", 0),
+                    source = sessionObj.optString("source", "api_server"),
+                    lastActiveAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
+                )
+                Result.success(session)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Create session: POST /api/sessions
     // ------------------------------------------------------------------
     suspend fun createNewSession(config: ConnectionConfig, title: String? = null, model: String? = null): Result<HermesSession> = withContext(Dispatchers.IO) {
@@ -870,6 +921,114 @@ class HermesNetworkClient {
                 }
             }
             Result.failure(Exception("Approval submission failed: $lastError"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Cron jobs: /api/jobs (full CRUD)
+    // ------------------------------------------------------------------
+    suspend fun fetchJobs(config: ConnectionConfig): Result<List<CronJob>> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/jobs"
+            val request = Request.Builder().url(url).authHeaders(config).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@use Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val json = JSONObject(bodyStr)
+                val jobsArr = json.optJSONArray("jobs") ?: JSONArray()
+                val list = mutableListOf<CronJob>()
+                for (i in 0 until jobsArr.length()) {
+                    jobsArr.optJSONObject(i)?.let { obj -> CronJob.fromJson(obj)?.let { list.add(it) } }
+                }
+                Result.success(list)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createJob(
+        config: ConnectionConfig,
+        name: String,
+        schedule: String,
+        prompt: String,
+        deliver: String = "local"
+    ): Result<CronJob> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/jobs"
+            val payload = JSONObject().apply {
+                put("name", name)
+                put("schedule", schedule)
+                put("prompt", prompt)
+                put("deliver", deliver)
+            }
+            val body = payload.toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).authHeaders(config).post(body).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@use Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val json = JSONObject(bodyStr)
+                val jobObj = json.optJSONObject("job") ?: json
+                val job = CronJob.fromJson(jobObj)
+                if (job != null) Result.success(job)
+                else Result.failure(Exception("Malformed job response"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateJob(config: ConnectionConfig, jobId: String, fields: Map<String, Any>): Result<CronJob> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/jobs/$jobId"
+            val payload = JSONObject()
+            fields.forEach { (k, v) -> payload.put(k, v) }
+            val body = payload.toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).authHeaders(config).patch(body).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@use Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val json = JSONObject(bodyStr)
+                val jobObj = json.optJSONObject("job") ?: json
+                val job = CronJob.fromJson(jobObj)
+                if (job != null) Result.success(job)
+                else Result.failure(Exception("Malformed job response"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun jobAction(config: ConnectionConfig, jobId: String, action: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/jobs/$jobId/$action"
+            val body = "{}".toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).authHeaders(config).post(body).build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) Result.success(true)
+                else Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteJob(config: ConnectionConfig, jobId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/jobs/$jobId"
+            val request = Request.Builder().url(url).authHeaders(config).delete().build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) Result.success(true)
+                else Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }

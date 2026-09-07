@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
@@ -79,6 +81,7 @@ import ee.oversight.hermes.ui.theme.MonospaceStyle
 import ee.oversight.hermes.ui.theme.NeonAmber
 import ee.oversight.hermes.ui.theme.NeonCyan
 import ee.oversight.hermes.ui.theme.NeonRed
+import ee.oversight.hermes.ui.theme.NeonVioletLight
 import ee.oversight.hermes.ui.theme.TextPrimary
 import ee.oversight.hermes.ui.theme.TextSecondary
 import java.text.SimpleDateFormat
@@ -122,6 +125,8 @@ fun SessionsDrawerContent(
     pinnedSessionIds: Set<String> = emptySet(),
     onTogglePinSession: ((String) -> Unit)? = null,
     onExportSession: ((sessionId: String, title: String) -> Unit)? = null,
+    onRenameSession: ((sessionId: String, newTitle: String) -> Unit)? = null,
+    onForkSession: ((sessionId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -135,6 +140,7 @@ fun SessionsDrawerContent(
 
     var showCustomizeDialog by remember { mutableStateOf(false) }
     var sessionToDelete by remember { mutableStateOf<HermesSession?>(null) }
+    var sessionToRename by remember { mutableStateOf<HermesSession?>(null) }
 
     val dateFormat = remember { SimpleDateFormat("MMM d", Locale.ENGLISH) }
 
@@ -766,6 +772,48 @@ fun SessionsDrawerContent(
                                 DropdownMenuItem(
                                     text = {
                                         Text(
+                                            text = if (language == AppLanguage.AR) "إعادة تسمية الجلسة" else "Rename session",
+                                            style = MonospaceStyle.copy(fontSize = 13.sp, color = TextPrimary)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = null,
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        sessionToRename = s
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = if (language == AppLanguage.AR) "نسخ الجلسة (Fork)" else "Fork session",
+                                            style = MonospaceStyle.copy(fontSize = 13.sp, color = TextPrimary)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.CallSplit,
+                                            contentDescription = null,
+                                            tint = NeonVioletLight,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        onForkSession?.invoke(s.id)
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
                                             text = if (language == AppLanguage.AR) "مشاركة / تصدير الجلسة" else "Share / Export Session",
                                             style = MonospaceStyle.copy(fontSize = 13.sp, color = TextPrimary)
                                         )
@@ -849,6 +897,65 @@ fun SessionsDrawerContent(
                 },
                 dismissButton = {
                     TextButton(onClick = { sessionToDelete = null }) {
+                        Text(
+                            text = if (language == AppLanguage.AR) "إلغاء" else "Cancel",
+                            style = MonospaceStyle.copy(color = TextSecondary)
+                        )
+                    }
+                }
+            )
+        }
+
+        // Rename Session Dialog
+        if (sessionToRename != null) {
+            val s = sessionToRename!!
+            var renameText by remember(s.id) { mutableStateOf(s.title) }
+            AlertDialog(
+                onDismissRequest = { sessionToRename = null },
+                containerColor = Color(0xFF0F1420),
+                titleContentColor = NeonCyan,
+                textContentColor = TextPrimary,
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Edit, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (language == AppLanguage.AR) "إعادة تسمية الجلسة" else "Rename Session",
+                            style = MonospaceStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        )
+                    }
+                },
+                text = {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 14.sp),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(NeonCyan),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF1A2238))
+                            .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val title = renameText.trim()
+                        if (title.isNotEmpty()) {
+                            onRenameSession?.invoke(s.id, title)
+                        }
+                        sessionToRename = null
+                    }) {
+                        Text(
+                            text = if (language == AppLanguage.AR) "حفظ" else "Save",
+                            style = MonospaceStyle.copy(color = NeonCyan, fontWeight = FontWeight.Bold)
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { sessionToRename = null }) {
                         Text(
                             text = if (language == AppLanguage.AR) "إلغاء" else "Cancel",
                             style = MonospaceStyle.copy(color = TextSecondary)

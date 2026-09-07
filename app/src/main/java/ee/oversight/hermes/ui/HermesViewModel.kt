@@ -20,6 +20,7 @@ import ee.oversight.hermes.model.AvailableAiModels
 import ee.oversight.hermes.model.ChatMessage
 import ee.oversight.hermes.model.ConnectionConfig
 import ee.oversight.hermes.model.ConnectionStatus
+import ee.oversight.hermes.model.CronJob
 import ee.oversight.hermes.model.DiscoveredGateway
 import ee.oversight.hermes.model.GatewayHealth
 import ee.oversight.hermes.model.HermesSession
@@ -43,6 +44,7 @@ enum class AppTab {
     CHAT,
     TERMINAL,
     TELEMETRY,
+    JOBS,
     GATEWAY
 }
 
@@ -182,6 +184,11 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     // pre-existing history). Subsequent loads notify on count increases.
     private var _sessionsBaselineDone = false
     val sessions: StateFlow<List<HermesSession>> = _sessions.asStateFlow()
+
+    private val _jobs = MutableStateFlow<List<CronJob>>(emptyList())
+    val jobs: StateFlow<List<CronJob>> = _jobs.asStateFlow()
+    private val _isLoadingJobs = MutableStateFlow(false)
+    val isLoadingJobs: StateFlow<Boolean> = _isLoadingJobs.asStateFlow()
 
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
@@ -984,6 +991,87 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
+        }
+    }
+
+    fun renameSession(sessionId: String, newTitle: String) {
+        val title = newTitle.trim()
+        if (title.isEmpty() || title.isBlank()) return
+        viewModelScope.launch {
+            networkClient.renameSession(_config.value, sessionId, title).onSuccess {
+                _sessions.update { list ->
+                    list.map { if (it.id == sessionId) it.copy(title = title) else it }
+                }
+                HermesAppLog.info("Renamed session $sessionId to \"$title\"")
+            }.onFailure { e ->
+                HermesAppLog.error("Rename failed for $sessionId: ${e.message}")
+            }
+        }
+    }
+
+    fun forkSession(sessionId: String) {
+        viewModelScope.launch {
+            HermesAppLog.info("Forking session $sessionId...")
+            networkClient.forkSession(_config.value, sessionId).onSuccess { forked ->
+                _sessions.update { list -> (listOf(forked) + list) }
+                selectSession(forked.id)
+                HermesAppLog.info("Forked session -> ${forked.id} (${forked.title})")
+            }.onFailure { e ->
+                HermesAppLog.error("Fork failed for $sessionId: ${e.message}")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Cron jobs
+    // ------------------------------------------------------------------
+    fun loadJobs() {
+        if (_config.value.tailscaleIp.isBlank()) return
+        viewModelScope.launch {
+            _isLoadingJobs.value = true
+            networkClient.fetchJobs(_config.value)
+                .onSuccess { list -> _jobs.value = list }
+                .onFailure { e -> HermesAppLog.warn("Failed to load jobs: ${e.message}") }
+            _isLoadingJobs.value = false
+        }
+    }
+
+    fun createJob(name: String, schedule: String, prompt: String) {
+        viewModelScope.launch {
+            networkClient.createJob(_config.value, name, schedule, prompt)
+                .onSuccess { job ->
+                    _jobs.update { it + job }
+                    HermesAppLog.info("Created job \"${job.name}\" (${job.scheduleDisplay})")
+                }
+                .onFailure { e ->
+                    HermesAppLog.error("Create job failed: ${e.message}")
+                }
+        }
+    }
+
+    fun jobAction(jobId: String, action: String) {
+        viewModelScope.launch {
+            networkClient.jobAction(_config.value, jobId, action)
+                .onSuccess {
+                    HermesAppLog.info("Job $jobId $action")
+                    loadJobs()
+                }
+                .onFailure { e ->
+                    HermesAppLog.error("Job $action failed for $jobId: ${e.message}")
+                }
+        }
+    }
+
+    fun deleteJob(jobId: String) {
+        viewModelScope.launch {
+            networkClient.deleteJob(_config.value, jobId)
+                .onSuccess {
+                    _jobs.update { list -> list.filter { it.id != jobId } }
+                    HermesAppLog.info("Deleted job $jobId")
+                }
+                .onFailure { e ->
+                    HermesAppLog.error("Delete job failed for $jobId: ${e.message}")
+                }
         }
     }
 

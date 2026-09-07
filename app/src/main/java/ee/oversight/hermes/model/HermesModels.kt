@@ -192,3 +192,54 @@ data class HermesSession(
         reasoningTokens = reasoningTokens
     )
 }
+
+/**
+ * A scheduled cron job on the Hermes server (cron/jobs.py surfaced via
+ * /api/jobs). Field names mirror the server's job dict.
+ */
+data class CronJob(
+    val id: String,
+    val name: String,
+    val prompt: String = "",
+    val scheduleDisplay: String = "",
+    val scheduleKind: String = "interval",
+    val enabled: Boolean = true,
+    val state: String = "scheduled", // scheduled | paused | ...
+    val nextRunAt: String? = null,   // ISO timestamp
+    val lastRunAt: String? = null,   // ISO timestamp
+    val lastStatus: String? = null,  // success | error | ...
+    val lastError: String? = null,
+    val deliver: String = "local"
+) {
+    companion object {
+        fun fromJson(obj: org.json.JSONObject): CronJob? {
+            val id = obj.optString("id")
+            if (id.isBlank()) return null
+            // schedule may be a string or object {"kind":..., "minutes":..., "display":...}
+            val rawSchedule = obj.opt("schedule")
+            var display = obj.optString("schedule_display", "")
+            var kind = obj.optString("schedule_kind", "interval")
+            if (rawSchedule is org.json.JSONObject) {
+                kind = rawSchedule.optString("kind", kind)
+                if (display.isBlank()) display = rawSchedule.optString("display", "")
+            } else if (rawSchedule is String && display.isBlank()) {
+                display = rawSchedule
+            }
+            if (display.isBlank()) display = obj.optString("schedule", "")
+            return CronJob(
+                id = id,
+                name = obj.optString("name", id),
+                prompt = obj.optString("prompt", ""),
+                scheduleDisplay = display,
+                scheduleKind = kind,
+                enabled = obj.optBoolean("enabled", true),
+                state = obj.optString("state", if (obj.optBoolean("enabled", true)) "scheduled" else "paused"),
+                nextRunAt = obj.optString("next_run_at", "").ifBlank { null },
+                lastRunAt = obj.optString("last_run_at", "").ifBlank { null },
+                lastStatus = obj.optString("last_status", "").ifBlank { null },
+                lastError = obj.optString("last_error", "").ifBlank { null },
+                deliver = obj.optString("deliver", "local")
+            )
+        }
+    }
+}

@@ -12,10 +12,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Lan
 import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.WindowInsets
@@ -54,11 +56,13 @@ import ee.oversight.hermes.ui.components.CyberpunkTopBar
 import ee.oversight.hermes.ui.screens.ChatTerminalScreen
 import ee.oversight.hermes.ui.screens.GatewayConfigScreen
 import ee.oversight.hermes.ui.screens.HermesTerminalScreen
+import ee.oversight.hermes.ui.screens.JobsScreen
 import ee.oversight.hermes.ui.screens.SystemMonitoringScreen
 import ee.oversight.hermes.ui.theme.CyberBg
 import ee.oversight.hermes.ui.theme.CyberSurface
 import ee.oversight.hermes.ui.theme.CyberSurfaceBorder
 import ee.oversight.hermes.ui.theme.MonospaceStyle
+import ee.oversight.hermes.ui.theme.NeonAmber
 import ee.oversight.hermes.ui.theme.NeonCyan
 import ee.oversight.hermes.ui.theme.NeonViolet
 import ee.oversight.hermes.ui.theme.TextPrimary
@@ -106,6 +110,8 @@ fun MainScreen(
     val biometricLockEnabled by vm.biometricLockEnabled.collectAsState()
     val isSessionAutoApproved = currentSessionId != null && sessionAutoApproveIds.contains(currentSessionId)
     val currentSessionCost = sessions.find { it.id == currentSessionId }?.costUsd ?: 0.0
+    val jobs by vm.jobs.collectAsState()
+    val isLoadingJobs by vm.isLoadingJobs.collectAsState()
 
     val layoutDirection = if (language == AppLanguage.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
 
@@ -157,6 +163,13 @@ fun MainScreen(
                         },
                         onExportSession = { id, title ->
                             vm.exportSessionAsMarkdown(id, title, context)
+                        },
+                        onRenameSession = { id, newTitle ->
+                            vm.renameSession(id, newTitle)
+                        },
+                        onForkSession = { id ->
+                            vm.forkSession(id)
+                            scope.launch { drawerState.close() }
                         },
                         onRefreshSessions = {
                             vm.loadSessions()
@@ -301,6 +314,37 @@ fun MainScreen(
                         modifier = Modifier.testTag("nav_telemetry")
                     )
 
+                    // Tab 3.5: Scheduled Jobs
+                    val isJobs = activeTab == AppTab.JOBS
+                    NavigationBarItem(
+                        selected = isJobs,
+                        onClick = { vm.setActiveTab(AppTab.JOBS); vm.loadJobs() },
+                        icon = {
+                            Icon(
+                                imageVector = if (isJobs) Icons.Filled.Schedule else Icons.Outlined.Schedule,
+                                contentDescription = HermesStrings.tabJobs(language),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = HermesStrings.tabJobs(language),
+                                style = MonospaceStyle.copy(
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isJobs) FontWeight.Bold else FontWeight.Normal
+                                )
+                            )
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = NeonAmber,
+                            selectedTextColor = TextPrimary,
+                            unselectedIconColor = TextSecondary,
+                            unselectedTextColor = TextSecondary,
+                            indicatorColor = NeonAmber.copy(alpha = 0.2f)
+                        ),
+                        modifier = Modifier.testTag("nav_jobs")
+                    )
+
                     // Tab 4: Gateway & Tailscale
                     val isGateway = activeTab == AppTab.GATEWAY
                     NavigationBarItem(
@@ -425,6 +469,17 @@ fun MainScreen(
                             onTestPing = { vm.testPing() },
                             onStartAutoDiscovery = { vm.startAutoDiscovery() },
                             onConnectDiscovered = { discovered, useTailscale -> vm.connectDiscovered(discovered, useTailscale) }
+                        )
+                    }
+                    AppTab.JOBS -> {
+                        JobsScreen(
+                            jobs = jobs,
+                            isLoading = isLoadingJobs,
+                            language = language,
+                            onRefresh = { vm.loadJobs() },
+                            onCreateJob = { name, schedule, prompt -> vm.createJob(name, schedule, prompt) },
+                            onJobAction = { jobId, action -> vm.jobAction(jobId, action) },
+                            onDeleteJob = { jobId -> vm.deleteJob(jobId) }
                         )
                     }
                 }
