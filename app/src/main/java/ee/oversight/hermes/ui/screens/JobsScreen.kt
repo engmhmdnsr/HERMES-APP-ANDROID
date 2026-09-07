@@ -199,6 +199,7 @@ private fun JobCard(
     onDelete: (jobId: String) -> Unit
 ) {
     val enabled = job.enabled
+    var confirmDelete by remember { mutableStateOf(false) }
     val statusColor = when {
         job.lastStatus == "error" -> NeonRed
         enabled -> NeonGreen
@@ -322,10 +323,58 @@ private fun JobCard(
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(if (language == AppLanguage.AR) "شغّل الآن" else "Run now", style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonCyan))
             }
-            IconButton(onClick = { onDelete(job.id) }, modifier = Modifier.size(28.dp)) {
+            IconButton(onClick = { confirmDelete = true }, modifier = Modifier.size(28.dp)) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NeonRed, modifier = Modifier.size(16.dp))
             }
         }
+    }
+
+    // Delete confirmation (destructive + irreversible: the job is gone server-side).
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = Color(0xFF0F1420),
+            titleContentColor = NeonRed,
+            textContentColor = TextPrimary,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Delete, null, tint = NeonRed, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (language == AppLanguage.AR) "حذف المهمة" else "Delete Job",
+                        style = MonospaceStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = if (language == AppLanguage.AR)
+                        "متأكد إنك عايز تحذف \"${job.name}\" نهائيًا؟ المهمة هتتشف من السيرفر ومفيش رجعة."
+                    else
+                        "Delete \"${job.name}\" permanently? The job is removed from the server and cannot be undone.",
+                    style = MonospaceStyle.copy(fontSize = 13.sp, color = TextSecondary)
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete(job.id)
+                }) {
+                    Text(
+                        text = if (language == AppLanguage.AR) "حذف" else "Delete",
+                        style = MonospaceStyle.copy(color = NeonRed, fontWeight = FontWeight.Bold)
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text(
+                        text = if (language == AppLanguage.AR) "إلغاء" else "Cancel",
+                        style = MonospaceStyle.copy(color = TextSecondary)
+                    )
+                }
+            }
+        )
     }
 }
 
@@ -338,6 +387,7 @@ private fun CreateJobDialog(
     var name by remember { mutableStateOf("") }
     var schedule by remember { mutableStateOf("every 1h") }
     var prompt by remember { mutableStateOf("") }
+    var scheduleError by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -366,13 +416,20 @@ private fun CreateJobDialog(
                 )
                 OutlinedTextField(
                     value = schedule,
-                    onValueChange = { schedule = it },
+                    onValueChange = { schedule = it; scheduleError = null },
                     label = { Text(HermesStrings.jobsScheduleLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
                     placeholder = { Text(HermesStrings.jobsScheduleHint(language), style = MonospaceStyle.copy(fontSize = 9.sp)) },
                     singleLine = true,
+                    isError = scheduleError != null,
                     textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (scheduleError != null) {
+                    Text(
+                        text = scheduleError!!,
+                        style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonRed)
+                    )
+                }
                 OutlinedTextField(
                     value = prompt,
                     onValueChange = { prompt = it },
@@ -388,8 +445,14 @@ private fun CreateJobDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                if (name.isNotBlank() && schedule.isNotBlank() && prompt.isNotBlank()) {
-                    onCreate(name.trim(), schedule.trim(), prompt.trim())
+                val sched = schedule.trim()
+                val err = validateSchedule(sched)
+                if (err != null) {
+                    scheduleError = err
+                    return@TextButton
+                }
+                if (name.isNotBlank() && sched.isNotEmpty() && prompt.isNotBlank()) {
+                    onCreate(name.trim(), sched, prompt.trim())
                 }
             }) {
                 Text(
@@ -407,6 +470,28 @@ private fun CreateJobDialog(
             }
         }
     )
+}
+
+/**
+ * Validate a cron schedule expression before sending it to the server.
+ * Accepts: "every <n><unit>" (every 1h / every 30m / every monday 9am),
+ * ISO "at <datetime>", or a 5-field cron expression.
+ * Returns a human-readable error string, or null when valid.
+ */
+private fun validateSchedule(schedule: String): String? {
+    val s = schedule.trim()
+    if (s.isEmpty()) return "Schedule is required"
+    val lower = s.lowercase()
+    return when {
+        // "every ..." natural phrases — pass through, server parses them.
+        lower.startsWith("every ") -> null
+        // Cron: 5 whitespace-separated fields of digits/*/?/,/-.
+        s.matches(Regex("""^[0-9*/?,A-Za-z-]+(\s+[0-9*/?,A-Za-z-]+){4}$""")) -> null
+        // ISO / "at ..." phrases.
+        lower.startsWith("at ") -> null
+        s.contains(":") && s.contains("-") && s.contains("T") -> null // ISO datetime
+        else -> "Invalid schedule. Use formats like: every 1h, every monday 9am, 0 9 * * *, or an ISO date"
+    }
 }
 
 /** Format an ISO-8601 timestamp to a short readable local string. */

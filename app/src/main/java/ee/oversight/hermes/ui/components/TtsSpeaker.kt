@@ -31,6 +31,11 @@ import java.util.Locale
 /**
  * Small speaker button next to an assistant reply: reads the text aloud
  * using the device's built-in TextToSpeech engine (offline, no API key).
+ *
+ * The TextToSpeech engine is shared app-wide via a singleton holder so a
+ * long chat with many messages does not create/destroy an engine per row
+ * while scrolling (which caused jank + battery drain). The button stays
+ * disabled until the engine reports ready, so the first tap always works.
  */
 @Composable
 fun TtsSpeaker(
@@ -39,10 +44,30 @@ fun TtsSpeaker(
 ) {
     val context = LocalContext.current
     var speaking by remember { mutableStateOf(false) }
-    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     var ready by remember { mutableStateOf(false) }
 
-    fun speak(engine: TextToSpeech) {
+    // Initialize the shared engine lazily; re-check until it reports ready
+    // (the engine init is async — first taps should still work).
+    DisposableEffect(Unit) {
+        SharedTts.ensure(context)
+        // Poll briefly: TTS init usually completes in <1s.
+        val check = object : android.os.CountDownTimer(3000, 100) {
+            override fun onTick(millisUntilFinished: Long) {
+                if (SharedTts.isReady()) {
+                    ready = true
+                    cancel()
+                }
+            }
+            override fun onFinish() {
+                ready = SharedTts.isReady()
+            }
+        }
+        check.start()
+        onDispose { check.cancel() }
+    }
+
+    fun speak() {
+        val engine = SharedTts.engine ?: return
         engine.language = Locale.getDefault()
         val utteranceId = "hermes_tts_${System.currentTimeMillis()}"
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -62,35 +87,18 @@ fun TtsSpeaker(
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 
-    // Create engine once per composition, release on dispose.
-    DisposableEffect(Unit) {
-        val engine = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                ready = true
-            }
-        }
-        tts = engine
-        onDispose {
-            engine.stop()
-            engine.shutdown()
-        }
-    }
-
     Box(
         modifier = modifier
             .size(24.dp)
             .clip(CircleShape)
             .background(if (speaking) NeonCyan.copy(alpha = 0.2f) else Color(0xFF141A26))
             .border(1.dp, if (speaking) NeonCyan else Color(0xFF2A3448), CircleShape)
-            .clickable(enabled = text.isNotBlank()) {
-                val engine = tts
-                if (engine != null) {
-                    if (speaking) {
-                        engine.stop()
-                        speaking = false
-                    } else {
-                        speak(engine)
-                    }
+            .clickable(enabled = text.isNotBlank() && ready) {
+                if (speaking) {
+                    SharedTts.engine?.stop()
+                    speaking = false
+                } else {
+                    speak()
                 }
             },
         contentAlignment = Alignment.Center
@@ -98,8 +106,34 @@ fun TtsSpeaker(
         Icon(
             imageVector = Icons.Default.VolumeUp,
             contentDescription = "Speak reply",
-            tint = if (speaking) NeonCyan else TextSecondary,
+            tint = if (speaking) NeonCyan else if (ready) TextSecondary else TextSecondary.copy(alpha = 0.4f),
             modifier = Modifier.size(14.dp)
         )
+    }
+}
+
+/**
+ * App-wide singleton TextToSpeech engine: created lazily on first use and
+ * kept for the process lifetime (released never — the OS reclaims it when
+ * the process dies; Android docs recommend one engine per app).
+ */
+private object SharedTts {
+    @Volatile
+    var engine: TextToSpeech? = null
+        private set
+
+    @Volatile
+    private var readyFlag = false
+
+    fun isReady(): Boolean = readyFlag
+
+    fun ensure(context: Context) {
+        if (engine != null) return
+        synchronized(this) {
+            if (engine != null) return
+            engine = TextToSpeech(context.applicationContext) { status ->
+                readyFlag = status == TextToSpeech.SUCCESS
+            }
+        }
     }
 }

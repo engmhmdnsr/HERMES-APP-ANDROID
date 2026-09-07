@@ -60,6 +60,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +95,7 @@ import ee.oversight.hermes.ui.theme.CyberSurface
 import ee.oversight.hermes.ui.theme.CyberSurfaceBorder
 import ee.oversight.hermes.ui.theme.CyberSurfaceElevated
 import ee.oversight.hermes.ui.theme.MonospaceStyle
+import ee.oversight.hermes.ui.theme.NeonAmber
 import ee.oversight.hermes.ui.theme.NeonCyan
 import ee.oversight.hermes.ui.theme.NeonGreen
 import ee.oversight.hermes.ui.theme.NeonRed
@@ -733,44 +735,103 @@ fun GatewayConfigScreen(
             Spacer(modifier = Modifier.height(10.dp))
         }
 
-        // ===== Auto-discovery (compact, kept working via beacon) =====
-        if (discoveredGateway != null || isDiscovering) {
-            SectionCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isDiscovering) {
+        // ===== Auto-discovery (always visible: start button + state) =====
+        SectionCard(borderColor = if (discoveredGateway != null) NeonGreen.copy(alpha = 0.4f) else CyberSurfaceBorder) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.NetworkCheck, null, tint = NeonCyan, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = HermesStrings.autoDiscoverTitle(language),
+                    style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonCyan)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            when {
+                isDiscovering -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(strokeWidth = 2.dp, color = NeonCyan, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = HermesStrings.autoDiscoverSearching(language),
                             style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary)
                         )
-                    } else if (discoveredGateway != null) {
-                        Column(modifier = Modifier.weight(1f)) {
+                    }
+                }
+                discoveredGateway != null -> {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, null, tint = NeonGreen, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = HermesStrings.autoDiscoverFoundTitle(language, discoveredGateway.hostname),
                                 style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NeonGreen)
                             )
-                            Text(
-                                text = "${discoveredGateway.ip}:${discoveredGateway.port}",
-                                style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
-                            )
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${discoveredGateway.ip}:${discoveredGateway.port}",
+                            style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        // The beacon deliberately carries no API key (security).
+                        // Tell the user plainly that the key still needs manual entry.
+                        Text(
+                            text = if (language == AppLanguage.AR)
+                                "⚠️ لسه محتاج تلصق مفتاح الـ API يدويًا في خانة المفتاح فوق (الـ beacon مش بيبعت المفتاح للأمان)"
+                            else
+                                "⚠️ You still need to paste the API key manually in the key field above (the beacon never sends the key, for security)",
+                            style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonAmber)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { onConnectDiscovered(discoveredGateway, true) },
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonGreen),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).height(36.dp)
+                            ) {
+                                Text(
+                                    text = HermesStrings.autoDiscoverBtnConnect(language),
+                                    style = MonospaceStyle.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black),
+                                    maxLines = 1
+                                )
+                            }
+                            TextButton(onClick = { onStartAutoDiscovery() }, modifier = Modifier.height(36.dp)) {
+                                Text(
+                                    text = HermesStrings.autoDiscoverBtnRescan(language),
+                                    style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonCyan)
+                                )
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    // Nothing found yet (or never searched): explain + provide the trigger.
+                    Column {
+                        Text(
+                            text = HermesStrings.autoDiscoverNotFound(language),
+                            style = MonospaceStyle.copy(fontSize = 11.sp, color = TextSecondary, lineHeight = 15.sp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
                         Button(
-                            onClick = { onConnectDiscovered(discoveredGateway, true) },
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonGreen),
+                            onClick = { onStartAutoDiscovery() },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(36.dp)
+                            modifier = Modifier.fillMaxWidth().height(38.dp)
                         ) {
+                            Icon(Icons.Default.NetworkCheck, null, tint = Color(0xFF06121F), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = HermesStrings.autoDiscoverBtnConnect(language),
-                                style = MonospaceStyle.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                text = if (language == AppLanguage.AR) "ابحث عن جهازي الآن" else "Scan for my PC now",
+                                style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06121F))
                             )
                         }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(10.dp))
         }
+        Spacer(modifier = Modifier.height(10.dp))
 
         // ===== App Logs =====
         SectionCard {
