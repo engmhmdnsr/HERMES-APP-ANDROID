@@ -154,6 +154,7 @@ fun GatewayConfigScreen(
 
     var ipInput by remember(config.tailscaleIp) { mutableStateOf(config.tailscaleIp) }
     var portInput by remember(config.port) { mutableStateOf(config.port.toString()) }
+    var portError by remember { mutableStateOf<String?>(null) }
     var apiKeyInput by remember(config.apiKey) { mutableStateOf(config.apiKey) }
     var remoteGatewayUrlInput by remember(config.remoteGatewayUrl) { mutableStateOf(config.remoteGatewayUrl) }
     var useCustomGatewayUrl by remember(config.useCustomGatewayUrl) { mutableStateOf(config.useCustomGatewayUrl) }
@@ -373,15 +374,26 @@ fun GatewayConfigScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = portInput,
-                        onValueChange = { portInput = it },
+                        onValueChange = { newVal ->
+                            portInput = newVal.filter { it.isDigit() }.take(5)
+                            portError = null
+                        },
                         label = { Text(HermesStrings.portLabel(language), style = MonospaceStyle.copy(fontSize = 11.sp)) },
                         placeholder = { Text("8080", style = MonospaceStyle.copy(fontSize = 11.sp)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
+                        isError = portError != null,
                         textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 13.sp),
                         colors = fieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (portError != null) {
+                        Text(
+                            text = portError!!,
+                            style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonRed),
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // Protocol choice: HTTP / HTTPS
@@ -406,14 +418,42 @@ fun GatewayConfigScreen(
                     }
                     if (!useHttpsInput) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = if (language == AppLanguage.AR)
-                                "⚠️ تحذير: المفتاح (API key) هيتبع من غير تشفير على الشبكة. فعّل HTTPS أو استخدم شبكة موثوقة (Tailscale)."
-                            else
-                                "⚠️ Warning: your API key is sent unencrypted over this network. Enable HTTPS or use a trusted network (Tailscale).",
-                            style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonRed.copy(alpha = 0.9f)),
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
+                        // If connecting to a PUBLIC domain over plain HTTP the key
+                        // crosses the open internet in cleartext — much worse than
+                        // the private-IP case. Detect it and warn hard.
+                        val targetHost = remoteGatewayUrlInput.trim()
+                            .removePrefix("https://").removePrefix("http://")
+                            .substringBefore("/").substringBefore(":")
+                        val isPrivateHost = targetHost.startsWith("100.") ||
+                            targetHost.startsWith("192.168.") ||
+                            targetHost.startsWith("10.") ||
+                            targetHost.startsWith("172.16.") ||
+                            targetHost.startsWith("172.17.") ||
+                            targetHost.startsWith("172.18.") ||
+                            targetHost.startsWith("172.19.") ||
+                            targetHost.startsWith("172.2") ||
+                            targetHost.startsWith("172.30.") ||
+                            targetHost.startsWith("172.31.") ||
+                            targetHost == "localhost"
+                        if (useCustomGatewayUrl && targetHost.isNotBlank() && !isPrivateHost) {
+                            Text(
+                                text = if (language == AppLanguage.AR)
+                                    "🔴 خطر: رايح لدومين عام ($targetHost) من غير HTTPS — مفتاحك هيتبعت مكشوف على الإنترنت. فعّل HTTPS فورًا."
+                                else
+                                    "🔴 Danger: connecting to a public host ($targetHost) without HTTPS — your API key will travel in cleartext over the internet. Enable HTTPS now.",
+                                style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonRed, fontWeight = FontWeight.Bold),
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        } else {
+                            Text(
+                                text = if (language == AppLanguage.AR)
+                                    "⚠️ تحذير: المفتاح (API key) هيتبع من غير تشفير على الشبكة. فعّل HTTPS أو استخدم شبكة موثوقة (Tailscale)."
+                                else
+                                    "⚠️ Warning: your API key is sent unencrypted over this network. Enable HTTPS or use a trusted network (Tailscale).",
+                                style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonRed.copy(alpha = 0.9f)),
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                     }
                 } else {
                     OutlinedTextField(
@@ -492,7 +532,14 @@ fun GatewayConfigScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = {
-                            val parsedPort = portInput.toIntOrNull() ?: 8080
+                            val parsedPort = portInput.toIntOrNull()
+                            if (parsedPort == null || parsedPort !in 1..65535) {
+                                portError = if (language == AppLanguage.AR)
+                                    "بورت غير صالح: لازم يكون رقم بين 1 و 65535"
+                                else
+                                    "Invalid port: must be a number between 1 and 65535"
+                                return@Button
+                            }
                             onSaveConfig(
                                 config.copy(
                                     tailscaleIp = ipInput.trim(),
@@ -525,7 +572,14 @@ fun GatewayConfigScreen(
                     }
                     Button(
                         onClick = {
-                            val parsedPort = portInput.toIntOrNull() ?: 8080
+                            val parsedPort = portInput.toIntOrNull()
+                            if (parsedPort == null || parsedPort !in 1..65535) {
+                                portError = if (language == AppLanguage.AR)
+                                    "بورت غير صالح: لازم يكون رقم بين 1 و 65535"
+                                else
+                                    "Invalid port: must be a number between 1 and 65535"
+                                return@Button
+                            }
                             val updatedConfig = config.copy(
                                 tailscaleIp = ipInput.trim(),
                                 port = parsedPort,

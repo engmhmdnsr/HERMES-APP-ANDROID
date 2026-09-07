@@ -704,6 +704,7 @@ class HermesNetworkClient {
                 }
                 var sawContent = false
                 var currentEventName = ""
+                var receivedDone = false
                 while (!source.exhausted()) {
                     val line = source.readUtf8Line() ?: break
                     if (line.startsWith("event:")) {
@@ -713,7 +714,10 @@ class HermesNetworkClient {
                     }
                     if (line.startsWith("data:")) {
                         val data = line.removePrefix("data:").trim()
-                        if (data == "[DONE]") break
+                        if (data == "[DONE]") {
+                            receivedDone = true
+                            break
+                        }
                         if (data.isEmpty()) continue
                         try {
                             val json = JSONObject(data)
@@ -834,10 +838,21 @@ class HermesNetworkClient {
                         }
                     }
                 }
-                emit(StreamChunk.Done)
+                // Natural end = server sent [DONE]. If the stream just ended
+                // (socket closed / network drop) without it while we were mid-run,
+                // report an error so the UI doesn't silently stop mid-reply.
+                if (receivedDone) {
+                    emit(StreamChunk.Done)
+                } else if (sawContent) {
+                    emit(StreamChunk.Error(
+                        "The connection dropped before the reply finished. Check the network and try again."
+                    ))
+                } else {
+                    emit(StreamChunk.Done)
+                }
             }
         } catch (e: Exception) {
-            emit(StreamChunk.Error("Network stream error: ${e.localizedMessage}"))
+            emit(StreamChunk.Error(userFriendlyNetworkError(e)))
         } finally {
             call.cancel()
         }
@@ -1042,6 +1057,29 @@ class HermesNetworkClient {
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Translate low-level network exceptions into a short human-readable
+     * message (the app shows this string to the user in the chat).
+     */
+    private fun userFriendlyNetworkError(e: Exception): String {
+        val msg = e.message?.lowercase() ?: ""
+        return when {
+            msg.contains("timeout") || msg.contains("timed out") ->
+                "Connection timed out. Check that the gateway PC is on and reachable, then try again."
+            msg.contains("refused") || msg.contains("connect") && msg.contains("failed") ->
+                "Could not reach the gateway. Check the IP / port and that the gateway is running."
+            msg.contains("unknownhost") || msg.contains("no address") ->
+                "Could not resolve the gateway address. Check the IP or hostname you entered."
+            msg.contains("reset") || msg.contains("closed") || msg.contains("eof") ->
+                "The connection was closed unexpectedly (network dropped or gateway restarted). Try again."
+            msg.contains("ssl") || msg.contains("certificate") || msg.contains("https") ->
+                "Secure connection (TLS) failed. The gateway may not support HTTPS, or its certificate is invalid."
+            msg.contains("canceled") || msg.contains("cancelled") ->
+                "Stopped."
+            else -> "Connection error: ${e.localizedMessage ?: "unknown"}"
         }
     }
 

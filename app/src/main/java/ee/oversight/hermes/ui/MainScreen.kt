@@ -411,7 +411,8 @@ fun MainScreen(
                                 vm.resolveApproval(req, approved, mode)
                             },
                             queuedMessageCount = queuedMessages.size,
-                            onCancelQueued = { vm.cancelQueued() }
+                            onCancelQueued = { vm.cancelQueued() },
+                            onGoToSettings = { vm.setActiveTab(AppTab.GATEWAY) }
                         )
                     }
                     AppTab.TERMINAL -> {

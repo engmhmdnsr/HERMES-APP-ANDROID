@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -59,6 +60,8 @@ import android.app.Activity
 import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -170,6 +173,7 @@ fun ChatTerminalScreen(
     onResolveApproval: ((ApprovalRequest, Boolean, ApprovalMode) -> Unit)? = null,
     queuedMessageCount: Int = 0,
     onCancelQueued: (() -> Unit)? = null,
+    onGoToSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var promptInput by remember { mutableStateOf("") }
@@ -401,6 +405,22 @@ fun ChatTerminalScreen(
                             "No gateway configured yet.\n\nGo to the Settings tab and enter:\n• Your Hermes PC IP (e.g. 100.x.x.x)\n• The port (default 8080)\n• The API_SERVER_KEY from your .env file\n\nThen tap Connect and chat will start working.",
                         style = MonospaceStyle.copy(fontSize = 13.sp, color = TextSecondary, lineHeight = 21.sp)
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    if (onGoToSettings != null) {
+                        Button(
+                            onClick = onGoToSettings,
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(44.dp)
+                        ) {
+                            Icon(Icons.Default.Settings, null, tint = Color(0xFF06121F), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (language == AppLanguage.AR) "روح اضبط الاتصال" else "Set up connection",
+                                style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06121F))
+                            )
+                        }
+                    }
                 }
             } else {
             LazyColumn(
