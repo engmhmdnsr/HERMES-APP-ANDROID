@@ -375,18 +375,18 @@ class HermesNetworkClient {
             val limit = 500
             val maxMessages = 10000
 
-            while (list.size < maxMessages) {
+            loop@ while (list.size < maxMessages) {
                 val url = "${config.baseUrl}/api/sessions/$sessionId/messages?limit=$limit&offset=$offset"
                 val request = Request.Builder().url(url).authHeaders(config).get().build()
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
-                        if (list.isNotEmpty()) return@use
+                        if (list.isNotEmpty()) break@loop
                         return@withContext Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
                     }
                     val bodyStr = response.body?.string() ?: "{}"
                     val json = JSONObject(bodyStr)
                     val array = json.optJSONArray("data") ?: JSONArray()
-                    if (array.length() == 0) return@use
+                    if (array.length() == 0) break@loop
 
                     for (i in 0 until array.length()) {
                         val obj = array.getJSONObject(i)
@@ -415,7 +415,7 @@ class HermesNetworkClient {
                         )
                     }
 
-                    if (array.length() < limit) return@use
+                    if (array.length() < limit) break@loop
                     offset += array.length()
                 }
             }
