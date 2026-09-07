@@ -73,6 +73,17 @@ class HermesNetworkClient {
         .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
+    // Dedicated client for the SSE chat stream: the agent may run a slow tool
+    // (long web search, code execution, etc.) and send no bytes for many
+    // minutes. A finite readTimeout would kill the connection mid-run and the
+    // user would have to resend. 0 = no read timeout; the server keeps the
+    // stream alive and the UI cancels via call.cancel() when stopped.
+    private val streamClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+
     // ------------------------------------------------------------------
     // Auth helpers
     // ------------------------------------------------------------------
@@ -677,7 +688,7 @@ class HermesNetworkClient {
             .post(body)
             .build()
 
-        val call = client.newCall(request)
+        val call = streamClient.newCall(request)
         try {
             val response = call.execute()
             if (!response.isSuccessful) {
