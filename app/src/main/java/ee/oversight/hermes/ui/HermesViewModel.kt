@@ -250,7 +250,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            networkClient.submitApproval(
+            val result = networkClient.submitApproval(
                 config = _config.value,
                 runId = request.runId,
                 approved = approved,
@@ -266,7 +266,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 "✗ [DENIED BY USER] ${request.command}"
             }
-            HermesAppLog.info("Approval resolved: $resolutionBadge")
+            if (result.isSuccess) {
+                HermesAppLog.info("Approval resolved: $resolutionBadge")
+            } else {
+                HermesAppLog.error("Approval resolution FAILED ($resolutionBadge): ${result.exceptionOrNull()?.message}")
+                notifyApprovalFailed(request.runId, approved)
+            }
             _activeApprovalRequest.value = null
         }
     }
@@ -380,6 +385,24 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             nm.notify(HermesApp.NOTIF_REPLY_ID, notif)
         } catch (e: Exception) {
             HermesAppLog.warn("Reply notification failed: ${e.message}")
+        }
+    }
+
+    /** Post a small error notification when an approval decision could not reach the server. */
+    private fun notifyApprovalFailed(runId: String, approved: Boolean) {
+        try {
+            if (!canPostNotifications()) return
+            val ctx = getApplication<Application>()
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val notif = NotificationCompat.Builder(ctx, HermesApp.CHANNEL_REPLY)
+                .setSmallIcon(R.drawable.ic_stat_hermes)
+                .setContentTitle("⚠️ Approval not sent")
+                .setContentText("${if (approved) "Approve" else "Deny"} for run $runId failed to reach the server. Check the gateway connection and retry.")
+                .setAutoCancel(true)
+                .build()
+            nm.notify(runId.hashCode() * 31 + 7, notif)
+        } catch (e: Exception) {
+            HermesAppLog.warn("Failure notification failed: ${e.message}")
         }
     }
 
@@ -1278,12 +1301,16 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                                 if (autoApprove) {
                                     HermesAppLog.info("Auto-approving run ${req.runId} (${req.command})")
                                     viewModelScope.launch {
-                                        networkClient.submitApproval(
+                                        val r = networkClient.submitApproval(
                                             _config.value,
                                             req.runId,
                                             approved = true,
                                             sessionId = streamSessionId
                                         )
+                                        if (r.isFailure) {
+                                            HermesAppLog.error("Auto-approve FAILED for run ${req.runId}: ${r.exceptionOrNull()?.message}")
+                                            notifyApprovalFailed(req.runId, true)
+                                        }
                                     }
                                 } else {
                                     HermesAppLog.info("Interactive approval requested: ${req.command}")
@@ -1390,12 +1417,17 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         if (runId == null) return
         viewModelScope.launch {
             try {
-                networkClient.submitApproval(
+                val result = networkClient.submitApproval(
                     config = _config.value,
                     runId = runId,
                     approved = approved,
                     sessionId = sessionId
                 )
+                if (result.isFailure) {
+                    HermesAppLog.error("Approval from notification FAILED: ${result.exceptionOrNull()?.message}")
+                    notifyApprovalFailed(runId, approved)
+                    return@launch
+                }
                 HermesAppLog.info("Approval from notification: ${if (approved) "APPROVED" else "DENIED"} ($runId)")
                 // Cancel the notification
                 try {

@@ -837,6 +837,7 @@ class HermesNetworkClient {
 
             // Try /v1/runs/{runId}/approval first
             val urlPrimary = "${config.baseUrl}/v1/runs/$runId/approval"
+            var lastError: String? = null
             try {
                 val reqPrimary = Request.Builder()
                     .url(urlPrimary)
@@ -845,22 +846,30 @@ class HermesNetworkClient {
                     .build()
                 client.newCall(reqPrimary).execute().use { resp ->
                     if (resp.isSuccessful) return@withContext Result.success(true)
+                    lastError = "HTTP ${resp.code}"
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                lastError = e.message ?: "network error"
+            }
 
             // Fallback to /api/sessions/{sessionId}/approval if sessionId available
             if (sessionId != null) {
                 val urlFallback = "${config.baseUrl}/api/sessions/$sessionId/approval"
-                val reqFallback = Request.Builder()
-                    .url(urlFallback)
-                    .authHeaders(config)
-                    .post(body)
-                    .build()
-                client.newCall(reqFallback).execute().use { resp ->
-                    if (resp.isSuccessful) return@withContext Result.success(true)
+                try {
+                    val reqFallback = Request.Builder()
+                        .url(urlFallback)
+                        .authHeaders(config)
+                        .post(body)
+                        .build()
+                    client.newCall(reqFallback).execute().use { resp ->
+                        if (resp.isSuccessful) return@withContext Result.success(true)
+                        lastError = "HTTP ${resp.code}"
+                    }
+                } catch (e: Exception) {
+                    lastError = e.message ?: "network error"
                 }
             }
-            Result.success(true)
+            Result.failure(Exception("Approval submission failed: $lastError"))
         } catch (e: Exception) {
             Result.failure(e)
         }

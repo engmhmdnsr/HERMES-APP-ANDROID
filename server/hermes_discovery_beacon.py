@@ -14,6 +14,11 @@ Recommended: add to startup (Startup folder .vbs or Task Scheduler) so
 discovery works whenever the PC is on.
 
 Payload: {"service":"hermes-agent","hostname":...,"ip":...,"tailscale_ip":...,"port":8080,"apiKey":""}
+
+SECURITY NOTE: this beacon advertises the hostname + LAN/Tailscale IPs of
+this machine to anyone on the same network segment (UDP broadcast). The API
+key is intentionally never included. If you do not want your gateway's
+presence broadcast, do not run this script.
 """
 import json
 import os
@@ -22,7 +27,7 @@ import threading
 import time
 
 DISCOVERY_PORT = 8089
-BROADCAST_INTERVAL = 3.0  # seconds
+BROADCAST_INTERVAL = 30.0  # seconds between periodic broadcasts (probes are always answered instantly)
 
 def load_env(path):
     env = {}

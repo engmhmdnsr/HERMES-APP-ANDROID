@@ -393,6 +393,17 @@ fun GatewayConfigScreen(
                             onClick = { useHttpsInput = true }
                         )
                     }
+                    if (!useHttpsInput) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (language == AppLanguage.AR)
+                                "⚠️ تحذير: المفتاح (API key) هيتبع من غير تشفير على الشبكة. فعّل HTTPS أو استخدم شبكة موثوقة (Tailscale)."
+                            else
+                                "⚠️ Warning: your API key is sent unencrypted over this network. Enable HTTPS or use a trusted network (Tailscale).",
+                            style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonRed.copy(alpha = 0.9f)),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 } else {
                     OutlinedTextField(
                         value = remoteGatewayUrlInput,
