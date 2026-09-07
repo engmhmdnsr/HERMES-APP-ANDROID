@@ -140,6 +140,7 @@ fun GatewayConfigScreen(
     isDiscovering: Boolean = false,
     onStartAutoDiscovery: () -> Unit = {},
     onConnectDiscovered: (DiscoveredGateway, Boolean) -> Unit = { _, _ -> },
+    encryptionAvailable: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -188,6 +189,24 @@ fun GatewayConfigScreen(
         )
 
         Spacer(modifier = Modifier.height(14.dp))
+
+        // Security warning: secure storage unavailable on this device.
+        if (!encryptionAvailable) {
+            SectionCard(borderColor = NeonRed.copy(alpha = 0.5f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Lock, null, tint = NeonRed, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (language == AppLanguage.AR)
+                            "⚠️ التخزين المشفر مش متاح على جهازك — مفتاح الـ API مش هيتحفظ على الجهاز. هتحتاج تدخله كل مرة."
+                        else
+                            "⚠️ Secure storage is unavailable on this device — the API key will NOT be saved. You will need to enter it each session.",
+                        style = MonospaceStyle.copy(fontSize = 10.5.sp, color = NeonRed, fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+        }
 
         // ===== Language picker (dropdown) =====
         SectionCard {

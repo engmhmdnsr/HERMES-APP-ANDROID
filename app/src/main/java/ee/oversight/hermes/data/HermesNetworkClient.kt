@@ -35,6 +35,12 @@ data class PingResult(
     val message: String
 )
 
+/** A page of sessions from GET /api/sessions + whether more pages exist. */
+data class SessionPage(
+    val sessions: List<HermesSession>,
+    val hasMore: Boolean
+)
+
 sealed class StreamChunk {
     data class TextDelta(val text: String) : StreamChunk()
     data class ThinkingDelta(val text: String) : StreamChunk()
@@ -43,6 +49,7 @@ sealed class StreamChunk {
     data class ToolOutput(val toolId: String, val output: String, val status: ToolStatus) : StreamChunk()
     data class ApprovalNeeded(val request: ee.oversight.hermes.model.ApprovalRequest) : StreamChunk()
     data class Usage(val inputTokens: Long, val outputTokens: Long, val totalTokens: Long) : StreamChunk()
+    data class RunStarted(val runId: String) : StreamChunk()
     data class Error(val message: String) : StreamChunk()
     data object Done : StreamChunk()
 }
@@ -326,11 +333,11 @@ class HermesNetworkClient {
     }
 
     // ------------------------------------------------------------------
-    // Sessions: GET /api/sessions -> {"object":"list","data":[...]}
+    // Sessions: GET /api/sessions -> {"object":"list","data":[...],"has_more":bool}
     // ------------------------------------------------------------------
-    suspend fun fetchSessions(config: ConnectionConfig): Result<List<HermesSession>> = withContext(Dispatchers.IO) {
+    suspend fun fetchSessions(config: ConnectionConfig, offset: Int = 0, limit: Int = 100): Result<SessionPage> = withContext(Dispatchers.IO) {
         try {
-            val url = "${config.baseUrl}/api/sessions?limit=100"
+            val url = "${config.baseUrl}/api/sessions?limit=$limit&offset=$offset"
             val request = Request.Builder().url(url).authHeaders(config).get().build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
@@ -369,7 +376,8 @@ class HermesNetworkClient {
                 }
                 // Sort newest first
                 list.sortByDescending { it.startedAt }
-                Result.success(list)
+                val hasMore = json.optBoolean("has_more", false)
+                Result.success(SessionPage(sessions = list, hasMore = hasMore))
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -723,6 +731,14 @@ class HermesNetworkClient {
                             val json = JSONObject(data)
                             val eventName = currentEventName
 
+                            // Track the run id as soon as it appears (run.started /
+                            // any event carrying run_id / id) so Stop can cancel the
+                            // actual agent run server-side, not just drop the SSE pipe.
+                            if (eventName == "run.started") {
+                                val rid = json.optString("run_id", json.optString("id", ""))
+                                if (rid.isNotBlank()) emit(StreamChunk.RunStarted(rid))
+                            }
+
                             when {
                                 // OpenAI-compatible fallback
                                 json.has("choices") -> {
@@ -1051,6 +1067,25 @@ class HermesNetworkClient {
         try {
             val url = "${config.baseUrl}/api/jobs/$jobId"
             val request = Request.Builder().url(url).authHeaders(config).delete().build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) Result.success(true)
+                else Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Cancel a running agent run on the server: POST /v1/runs/{run_id}/stop.
+     * This is what actually stops the agent's tool execution on the PC —
+     * dropping the SSE connection alone leaves the run going server-side.
+     */
+    suspend fun stopRun(config: ConnectionConfig, runId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/v1/runs/$runId/stop"
+            val body = "{}".toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).authHeaders(config).post(body).build()
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) Result.success(true)
                 else Result.failure(Exception("HTTP ${response.code}: ${response.message}"))

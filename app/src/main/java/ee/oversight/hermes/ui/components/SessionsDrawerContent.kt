@@ -127,6 +127,9 @@ fun SessionsDrawerContent(
     onExportSession: ((sessionId: String, title: String) -> Unit)? = null,
     onRenameSession: ((sessionId: String, newTitle: String) -> Unit)? = null,
     onForkSession: ((sessionId: String) -> Unit)? = null,
+    hasMoreSessions: Boolean = false,
+    isLoadingMoreSessions: Boolean = false,
+    onLoadMoreSessions: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -851,6 +854,29 @@ fun SessionsDrawerContent(
                                         showMenu = false
                                         sessionToDelete = s
                                     }
+                                )
+                            }
+                        }
+                    }
+                }
+                // Load-more row at the bottom of the sessions list.
+                if (hasMoreSessions && onLoadMoreSessions != null) {
+                    item(key = "__load_more__") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = !isLoadingMoreSessions) { onLoadMoreSessions() }
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isLoadingMoreSessions) {
+                                CircularProgressIndicator(strokeWidth = 2.dp, color = NeonCyan, modifier = Modifier.size(16.dp))
+                            } else {
+                                Text(
+                                    text = if (language == AppLanguage.AR) "تحميل المزيد من الجلسات..." else "Load more sessions...",
+                                    style = MonospaceStyle.copy(fontSize = 11.sp, color = NeonCyan, fontWeight = FontWeight.SemiBold)
                                 )
                             }
                         }

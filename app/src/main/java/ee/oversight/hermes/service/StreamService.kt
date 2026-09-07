@@ -68,4 +68,22 @@ class StreamService : Service() {
     override fun onDestroy() {
         super.onDestroy()
     }
+
+    /**
+     * Android 15+ (targetSdk 35/36): a dataSync foreground service may run at
+     * most 6 hours per 24h while the app is in the background. When the system
+     * enforces that limit it calls onTimeout() — if we don't stop ourselves
+     * promptly the service is killed and may crash. Stop the stream too so the
+     * user sees a clean stop instead of a half-finished reply.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        val app = application as HermesApp
+        try {
+            app.viewModel.stopStreaming()
+        } catch (_: Exception) {
+            // ViewModel init may fail during shutdown — stopSelf is the fallback.
+        }
+        stopSelf()
+        super.onTimeout(startId, fgsType)
+    }
 }

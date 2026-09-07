@@ -60,5 +60,12 @@ class MainActivity : FragmentActivity() {
     if (sessionId != null) {
       (application as HermesApp).pendingOpenSession.value = sessionId
     }
+    // Notification "Approve" tap: store the approval; the app opens (biometric
+    // gate runs first when enabled), then MainScreen resolves it.
+    if (intent?.action == "ee.oversight.hermes.APPROVE_FROM_NOTIFICATION") {
+      val app = application as HermesApp
+      app.pendingApprovalRunId.value = intent.getStringExtra("run_id")
+      app.pendingApprovalSessionId.value = intent.getStringExtra("session_id")
+    }
   }
 }

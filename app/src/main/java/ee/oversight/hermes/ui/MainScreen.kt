@@ -112,6 +112,8 @@ fun MainScreen(
     val currentSessionCost = sessions.find { it.id == currentSessionId }?.costUsd ?: 0.0
     val jobs by vm.jobs.collectAsState()
     val isLoadingJobs by vm.isLoadingJobs.collectAsState()
+    val sessionsHasMore by vm.sessionsHasMore.collectAsState()
+    val isLoadingMoreSessions by vm.isLoadingMoreSessions.collectAsState()
 
     val layoutDirection = if (language == AppLanguage.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
 
@@ -129,6 +131,20 @@ fun MainScreen(
             vm.selectSession(sid)
             vm.setActiveTab(AppTab.CHAT)
             app.pendingOpenSession.value = null
+        }
+    }
+
+    // Notification "Approve" tap: after the biometric gate clears, resolve the
+    // approval. If app-lock is off the gate is already open, so this runs
+    // immediately; if it was on, the unlock flips needsBiometricUnlock and
+    // re-triggers this effect.
+    val pendingApprovalRunId by app.pendingApprovalRunId.collectAsState()
+    LaunchedEffect(pendingApprovalRunId, needsBiometricUnlock) {
+        val runId = pendingApprovalRunId
+        if (runId != null && !needsBiometricUnlock) {
+            vm.resolveApprovalFromNotification(runId, approved = true, sessionId = app.pendingApprovalSessionId.value)
+            app.pendingApprovalRunId.value = null
+            app.pendingApprovalSessionId.value = null
         }
     }
 
@@ -171,6 +187,9 @@ fun MainScreen(
                             vm.forkSession(id)
                             scope.launch { drawerState.close() }
                         },
+                        hasMoreSessions = sessionsHasMore,
+                        isLoadingMoreSessions = isLoadingMoreSessions,
+                        onLoadMoreSessions = { vm.loadMoreSessions() },
                         onRefreshSessions = {
                             vm.loadSessions()
                         },
@@ -466,6 +485,7 @@ fun MainScreen(
                             onLanguageChange = { vm.setAppLanguage(it) },
                             biometricLockEnabled = biometricLockEnabled,
                             onToggleBiometricLock = { vm.setBiometricLockEnabled(it) },
+                            encryptionAvailable = vm.encryptionAvailable,
                             onSaveConfig = { vm.updateConnectionConfig(it) },
                             onTestPing = { vm.testPing() },
                             onStartAutoDiscovery = { vm.startAutoDiscovery() },

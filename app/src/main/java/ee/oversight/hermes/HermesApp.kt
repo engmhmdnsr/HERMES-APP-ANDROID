@@ -19,6 +19,12 @@ class HermesApp : Application() {
     // Written by MainActivity, consumed by MainScreen (which then clears it).
     val pendingOpenSession = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
+    // Approval requested via the notification's Approve action. Tapping it
+    // opens the app (so biometric app-lock gates it) and this is set; the
+    // ViewModel resolves the approval once the user is authenticated.
+    val pendingApprovalRunId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val pendingApprovalSessionId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()

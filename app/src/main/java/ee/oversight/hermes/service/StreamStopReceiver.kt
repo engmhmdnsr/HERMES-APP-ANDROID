@@ -16,12 +16,6 @@ class StreamStopReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext as HermesApp
         when (intent.action) {
-            "ee.oversight.hermes.APPROVE" -> {
-                val runId = intent.getStringExtra("run_id")
-                val approved = intent.getBooleanExtra("approved", true)
-                val sessionId = intent.getStringExtra("session_id")
-                app.viewModel.resolveApprovalFromNotification(runId, approved, sessionId)
-            }
             "ee.oversight.hermes.DENY" -> {
                 val runId = intent.getStringExtra("run_id")
                 val approved = intent.getBooleanExtra("approved", false)

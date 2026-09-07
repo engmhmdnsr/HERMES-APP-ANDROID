@@ -24,10 +24,21 @@ class HermesPreferencesRepository(context: Context) {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (_: Exception) {
-            // Fallback (e.g. very first run before keys generated) - plain
-            // SharedPreferences is still app-private.
+            // Encryption unavailable (keystore broken / first-run race). We do
+            // NOT silently downgrade secrets to plaintext: non-secret prefs
+            // still work so the app is usable, but saveApiKey() refuses to
+            // persist the key and the UI shows a warning via encryptionAvailable.
             context.getSharedPreferences("hermes_control_prefs", Context.MODE_PRIVATE)
         }
+    }
+
+    /** False when EncryptedSharedPreferences failed to initialize (keystore
+     *  problem). In that state the API key is never persisted to disk. */
+    val encryptionAvailable: Boolean = try {
+        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        true
+    } catch (_: Exception) {
+        false
     }
 
     companion object {
@@ -79,14 +90,20 @@ class HermesPreferencesRepository(context: Context) {
     }
 
     fun saveConnectionConfig(config: ConnectionConfig) {
-        prefs.edit()
+        val edit = prefs.edit()
             .putString(KEY_IP, config.tailscaleIp)
             .putInt(KEY_PORT, config.port)
             .putString(KEY_GATEWAY_URL, config.remoteGatewayUrl)
             .putBoolean(KEY_USE_CUSTOM_URL, config.useCustomGatewayUrl)
-            .putString(KEY_API_KEY, config.apiKey)
             .putBoolean(KEY_USE_HTTPS, config.useHttps)
-            .apply()
+        // Never write the API key to disk unless encryption is actually on:
+        // a plaintext downgrade of the key would defeat the whole point.
+        if (encryptionAvailable) {
+            edit.putString(KEY_API_KEY, config.apiKey)
+        } else {
+            edit.remove(KEY_API_KEY)
+        }
+        edit.apply()
     }
 
     // ---- Named profiles (save/load/delete/rename) ----
@@ -122,7 +139,8 @@ class HermesPreferencesRepository(context: Context) {
             put("port", config.port)
             put("remoteGatewayUrl", config.remoteGatewayUrl)
             put("useCustomGatewayUrl", config.useCustomGatewayUrl)
-            put("apiKey", config.apiKey)
+            // Never persist the key when encryption is unavailable.
+            if (encryptionAvailable) put("apiKey", config.apiKey) else put("apiKey", "")
             put("useHttps", config.useHttps)
         }
         prefs.edit().putString("profile_$name", json.toString()).apply()

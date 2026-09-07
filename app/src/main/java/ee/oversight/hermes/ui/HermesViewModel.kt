@@ -190,6 +190,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _isLoadingJobs = MutableStateFlow(false)
     val isLoadingJobs: StateFlow<Boolean> = _isLoadingJobs.asStateFlow()
 
+    // Sessions pagination state (GET /api/sessions?limit=100&offset=N)
+    private val _sessionsHasMore = MutableStateFlow(false)
+    val sessionsHasMore: StateFlow<Boolean> = _sessionsHasMore.asStateFlow()
+    private val _isLoadingMoreSessions = MutableStateFlow(false)
+    val isLoadingMoreSessions: StateFlow<Boolean> = _isLoadingMoreSessions.asStateFlow()
+
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId.asStateFlow()
 
@@ -234,6 +240,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         if (sessionId == null) return false
         return _sessionAutoApproveIds.value.contains(sessionId)
     }
+
+    /** True when the API key can be stored encrypted on this device. */
+    val encryptionAvailable: Boolean
+        get() = prefsRepo.encryptionAvailable
 
     fun toggleSessionAutoApprove(sessionId: String) {
         _sessionAutoApproveIds.update { set ->
@@ -321,6 +331,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private var telemetryPollingJob: Job? = null
     private var healthPollingJob: Job? = null
     private var streamingJob: Job? = null
+    // run id of the currently-streaming agent run (from run.started SSE event).
+    // Stop uses it to cancel the run server-side via /v1/runs/{id}/stop.
+    @Volatile
+    private var _activeRunId: String? = null
     private var chatPollingJob: Job? = null
     private var pendingSend: String? = null
     private var pendingAttachments: List<String> = emptyList()
@@ -426,13 +440,16 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         try {
             val ctx = getApplication<Application>()
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            // Approve action -> same broadcast receiver, extra=approved:true
-            val approveIntent = android.content.Intent(ctx, Class.forName("ee.oversight.hermes.service.StreamStopReceiver"))
-                .setAction("ee.oversight.hermes.APPROVE")
+            // Approve requires biometric unlock when app lock is on: tapping it
+            // opens the app (which gates on biometrics) with the approval data,
+            // instead of resolving straight from the lock screen. Deny stays a
+            // direct broadcast (rejecting is always safe).
+            val approveIntent = android.content.Intent(ctx, Class.forName("ee.oversight.hermes.MainActivity"))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                .setAction("ee.oversight.hermes.APPROVE_FROM_NOTIFICATION")
                 .putExtra("run_id", request.runId)
-                .putExtra("approved", true)
                 .putExtra("session_id", request.sessionId)
-            val approvePi = android.app.PendingIntent.getBroadcast(
+            val approvePi = android.app.PendingIntent.getActivity(
                 ctx, request.runId.hashCode(), approveIntent,
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
             )
@@ -911,8 +928,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         if (_config.value.tailscaleIp.isBlank()) return
         viewModelScope.launch {
             _isLoadingSessions.value = true
-            val result = networkClient.fetchSessions(_config.value)
-            result.onSuccess { list ->
+            val result = networkClient.fetchSessions(_config.value, offset = 0, limit = 100)
+            result.onSuccess { page ->
+                val list = page.sessions
+                _sessionsHasMore.value = page.hasMore
                 // The server reports real last_active timestamps; trust them
                 // as the single source of truth for ordering. A message that
                 // arrived from elsewhere (Telegram, desktop, another client)
@@ -969,6 +988,33 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             _isLoadingSessions.value = false
+        }
+    }
+
+    /** Load the next page of sessions (append to the list) — "Load more" in the drawer. */
+    fun loadMoreSessions() {
+        if (_config.value.tailscaleIp.isBlank() || !_sessionsHasMore.value || _isLoadingMoreSessions.value) return
+        viewModelScope.launch {
+            _isLoadingMoreSessions.value = true
+            val offset = _sessions.value.size
+            val result = networkClient.fetchSessions(_config.value, offset = offset, limit = 100)
+            result.onSuccess { page ->
+                _sessionsHasMore.value = page.hasMore
+                // Merge, dedupe by id, keep newest-first order.
+                val existing = _sessions.value.associateBy { it.id }
+                val merged = (existing.values + page.sessions).distinctBy { it.id }
+                    .sortedByDescending { it.lastActiveAt.takeIf { t -> t > 0 } ?: it.startedAt }
+                _sessions.value = merged
+                // Extend the notification baseline to the newly-loaded sessions so
+                // loading more history doesn't spam notifications for old messages.
+                val known = _notifiedCounts.value
+                var newKnown = known
+                for (s in page.sessions) {
+                    if (!newKnown.containsKey(s.id)) newKnown = newKnown + (s.id to s.messageCount)
+                }
+                _notifiedCounts.value = newKnown
+            }
+            _isLoadingMoreSessions.value = false
         }
     }
 
@@ -1443,6 +1489,11 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                                     }
                                 }
                             }
+                            is StreamChunk.RunStarted -> {
+                                // Server told us the run id — remember it so Stop can
+                                // cancel the actual run (not just drop the SSE pipe).
+                                _activeRunId = chunk.runId
+                            }
                             is StreamChunk.ToolStart -> {
                                 // Tool activity started (terminal/web/etc) — bump too.
                                 receivedAnyContent = true
@@ -1527,6 +1578,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                             }
                             StreamChunk.Done -> {
                                 HermesAppLog.info("Stream completed")
+                                _activeRunId = null
                                 updateSessionMessages(streamSessionId) { list ->
                                     list.map { msg ->
                                         if (msg.id == agentMessageId) {
@@ -1627,6 +1679,19 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         updateSessionMessages(_currentSessionId.value) { list ->
             list.map { msg ->
                 if (msg.isStreaming) msg.copy(isStreaming = false) else msg
+            }
+        }
+        // Cancel the actual agent run on the server. Dropping the SSE pipe
+        // alone would leave Hermes executing tools on the PC.
+        val runId = _activeRunId
+        _activeRunId = null
+        if (runId != null && _config.value.tailscaleIp.isNotBlank()) {
+            viewModelScope.launch {
+                networkClient.stopRun(_config.value, runId)
+                    .onSuccess { HermesAppLog.info("Run $runId cancelled server-side") }
+                    .onFailure { e ->
+                        HermesAppLog.warn("Server-side run cancel failed for $runId: ${e.message}")
+                    }
             }
         }
     }
