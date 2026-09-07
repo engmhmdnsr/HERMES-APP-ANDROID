@@ -173,6 +173,14 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     val isDiscovering: StateFlow<Boolean> = _isDiscovering.asStateFlow()
 
     private val _sessions = MutableStateFlow<List<HermesSession>>(emptyList())
+    // Tracks the last message_count we notified (or opened) per session id, so a
+    // poll that sees a higher count knows a NEW message arrived from elsewhere
+    // (Telegram / desktop / another client) and can notify the user.
+    private val _notifiedCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    // False until the first successful session fetch completes: the first load
+    // establishes the baseline WITHOUT notifying (the user already knows about
+    // pre-existing history). Subsequent loads notify on count increases.
+    private var _sessionsBaselineDone = false
     val sessions: StateFlow<List<HermesSession>> = _sessions.asStateFlow()
 
     private val _currentSessionId = MutableStateFlow<String?>(null)
@@ -445,6 +453,57 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Notify the user that a NEW message arrived on a session that is not the
+     * one currently open (came from Telegram, desktop, or another client).
+     * Fetches the latest message to show a real snippet. Tapping opens the session.
+     */
+    private fun notifyNewMessage(session: HermesSession) {
+        try {
+            if (!canPostNotifications()) return
+            val ctx = getApplication<Application>()
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val openIntent = android.content.Intent(ctx, Class.forName("ee.oversight.hermes.MainActivity"))
+            openIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            openIntent.putExtra("open_session", session.id)
+            val pi = android.app.PendingIntent.getActivity(
+                ctx, session.id.hashCode(), openIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            val title = if (session.title.isBlank() || session.title == "null") {
+                if (session.source.isNotBlank()) "New message • ${session.source}" else "New message"
+            } else {
+                session.title
+            }
+            // Try to attach the actual latest message text as the snippet.
+            viewModelScope.launch {
+                var snippet: String? = null
+                try {
+                    networkClient.fetchSessionMessages(_config.value, session.id).getOrNull()?.let { msgs ->
+                        snippet = msgs.lastOrNull { it.content.isNotBlank() }?.content?.replace("\n", " ")?.take(120)
+                    }
+                } catch (_: Exception) {}
+                val notif = NotificationCompat.Builder(ctx, HermesApp.CHANNEL_NEW_MSG)
+                    .setSmallIcon(R.drawable.ic_stat_hermes)
+                    .setContentTitle(title)
+                    .setContentText(snippet ?: "A new message arrived on this session")
+                    .setStyle(
+                        if (snippet != null)
+                            NotificationCompat.BigTextStyle().bigText(snippet!!)
+                        else null
+                    )
+                    .setContentIntent(pi)
+                    .setAutoCancel(true)
+                    .setOnlyAlertOnce(true)
+                    .build()
+                // Unique id per session so multiple sessions can notify concurrently.
+                nm.notify("new_msg_${session.id}".hashCode(), notif)
+            }
+        } catch (e: Exception) {
+            HermesAppLog.warn("New-message notification failed: ${e.message}")
+        }
+    }
+
     /** Whether notification permission is granted (Android 13+). */
     private fun canPostNotifications(): Boolean {
         return try {
@@ -569,7 +628,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         healthPollingJob = viewModelScope.launch {
             var consecutiveFailures = 0
             var wasScreenOff = false
-            var lastSessionsRefresh = 0
             while (isActive) {
                 if (manuallyDisconnected) {
                     delay(15000)
@@ -617,12 +675,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     // Periodic refresh so a session that received a message from
                     // elsewhere (Telegram, another gateway) jumps to the top of the
-                    // drawer while the app is open.
-                    lastSessionsRefresh += 1
-                    if (lastSessionsRefresh >= 2) { // ~every 30s (15s poll)
-                        lastSessionsRefresh = 0
-                        loadSessions()
-                    }
+                    // drawer while the app is open. Poll every cycle (~15s) for
+                    // near-real-time updates; more aggressive would cost battery.
+                    loadSessions()
                     // Refresh gateway health status (official endpoint, works on
                     // every stock server) — powers the System tab.
                     viewModelScope.launch {
@@ -729,8 +784,11 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 val sid = _currentSessionId.value
                 val streaming = _isStreaming.value
                 val hasConfig = _config.value.tailscaleIp.isNotBlank()
-                val chatVisible = _activeTab.value == AppTab.CHAT
-                if (sid != null && !streaming && hasConfig && chatVisible) {
+                // Fetch on every visible tab (the screen-interactive check above
+                // already skips when the screen is off): external messages
+                // (Telegram/desktop) then appear instantly when the user returns
+                // to Chat, instead of only updating while Chat is the visible tab.
+                if (sid != null && !streaming && hasConfig) {
                     val result = networkClient.fetchSessionMessages(_config.value, sid)
                     result.onSuccess { msgs ->
                         if (msgs.isNotEmpty()) {
@@ -848,23 +906,51 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             _isLoadingSessions.value = true
             val result = networkClient.fetchSessions(_config.value)
             result.onSuccess { list ->
-                // The server now reports real last_active timestamps, so sorting
-                // is straightforward. Keep a locally-bumped time when it is newer
-                // than the server's (a message the user just sent may not have
-                // been reflected in the server list yet).
-                val prev = _sessions.value
-                val merged = list.map { fresh ->
-                    val old = prev.find { it.id == fresh.id }
-                    when {
-                        old == null -> fresh
-                        // Local bump (user just sent/received) is newer → keep it.
-                        old.lastActiveAt > fresh.lastActiveAt ->
-                            fresh.copy(lastActiveAt = old.lastActiveAt)
-                        else -> fresh
+                // The server reports real last_active timestamps; trust them
+                // as the single source of truth for ordering. A message that
+                // arrived from elsewhere (Telegram, desktop, another client)
+                // bumps the session's last_active server-side, so it jumps to
+                // the top on the next poll. (Local bumps in bumpSessionActivity
+                // only reorder in-memory instantly while streaming; they are
+                // intentionally NOT preserved here, otherwise a stale local
+                // clock value would permanently pin the session to the top
+                // and hide real external updates.)
+                val sorted = list.sortedByDescending { it.lastActiveAt.takeIf { t -> t > 0 } ?: it.startedAt }
+                _sessions.value = sorted
+                // Detect NEW messages on sessions we are not currently viewing
+                // and notify. Baseline is established on first sight so the app
+                // does not spam notifications for pre-existing history.
+                val known = _notifiedCounts.value
+                var changed = false
+                var newKnown = known
+                val current = _currentSessionId.value
+                val baseline = !_sessionsBaselineDone
+                for (s in sorted) {
+                    val prev = known[s.id]
+                    if (prev == null) {
+                        // Never seen before. On the very first load this just
+                        // establishes the baseline (no spam for old history).
+                        // On later loads a brand-new session with messages means
+                        // it was created/used elsewhere → notify.
+                        newKnown = newKnown + (s.id to s.messageCount)
+                        changed = true
+                        if (!baseline && s.messageCount > 0 && s.id != current) {
+                            notifyNewMessage(s)
+                        }
+                    } else if (s.messageCount > prev && s.id != current) {
+                        // Count went up while we are not looking at it → notify.
+                        newKnown = newKnown + (s.id to s.messageCount)
+                        changed = true
+                        notifyNewMessage(s)
+                    } else if (s.messageCount > prev) {
+                        // It is the open session; messages will show in-chat
+                        // (chat polling) — just advance the baseline silently.
+                        newKnown = newKnown + (s.id to s.messageCount)
+                        changed = true
                     }
                 }
-                val sorted = merged.sortedByDescending { it.lastActiveAt.takeIf { t -> t > 0 } ?: it.startedAt }
-                _sessions.value = sorted
+                if (changed) _notifiedCounts.value = newKnown
+                _sessionsBaselineDone = true
                 val active = sorted.find { it.id == _currentSessionId.value }
                 if (active != null) {
                     _activeTokenUsage.value = active.toTokenUsage()

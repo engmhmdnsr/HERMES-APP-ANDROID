@@ -1,5 +1,8 @@
 package ee.oversight.hermes.ui.screens
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -61,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -156,6 +160,11 @@ fun GatewayConfigScreen(
     var isKeyVisible by remember { mutableStateOf(false) }
     var apiKeyCopied by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
+    var feedbackText by remember { mutableStateOf("") }
+    var feedbackEmail by remember { mutableStateOf("") }
+    var feedbackSending by remember { mutableStateOf(false) }
+    var feedbackSent by remember { mutableStateOf(false) }
+    val feedbackScope = rememberCoroutineScope()
 
     Column(
         modifier = modifier
@@ -992,6 +1001,123 @@ fun GatewayConfigScreen(
             )
         }
 
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // ===== Feedback card (bottom): user → developer email via FormSubmit =====
+        SectionCard(borderColor = NeonCyan.copy(alpha = 0.35f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Email, null, tint = NeonCyan, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (language == AppLanguage.AR) "رأيك يهمنا" else "FEEDBACK",
+                    style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = NeonCyan)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (language == AppLanguage.AR)
+                    "رسالتك هتوصلك للمطور مباشرة على الإيميل. ساعدنا نحسّن التطبيق."
+                else
+                    "Your message goes straight to the developer's inbox. Help us improve the app.",
+                style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            OutlinedTextField(
+                value = feedbackText,
+                onValueChange = { feedbackText = it; feedbackSent = false },
+                label = { Text(if (language == AppLanguage.AR) "رسالتك / اقتراحك" else "Your message / suggestion", style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                placeholder = { Text(if (language == AppLanguage.AR) "اكتب ملاحظاتك هنا..." else "Write your feedback here...", style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)) },
+                minLines = 3,
+                maxLines = 6,
+                textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
+                colors = fieldColors(),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = feedbackEmail,
+                onValueChange = { feedbackEmail = it },
+                label = { Text(if (language == AppLanguage.AR) "إيميلك (اختياري للرد)" else "Your email (optional, for reply)", style = MonospaceStyle.copy(fontSize = 11.sp)) },
+                placeholder = { Text("you@example.com", style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary)) },
+                singleLine = true,
+                textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
+                colors = fieldColors(),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Button(
+                onClick = {
+                    val msg = feedbackText.trim()
+                    if (msg.isEmpty()) {
+                        Toast.makeText(
+                            ctx,
+                            if (language == AppLanguage.AR) "اكتب رسالتك الأول" else "Write a message first",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        return@Button
+                    }
+                    feedbackSending = true
+                    feedbackScope.launch {
+                        val ok = sendFeedbackEmail(
+                            message = msg,
+                            replyEmail = feedbackEmail.trim(),
+                            deviceLabel = android.os.Build.MODEL + " / " + android.os.Build.VERSION.RELEASE
+                        )
+                        feedbackSending = false
+                        if (ok) {
+                            feedbackSent = true
+                            feedbackText = ""
+                            feedbackEmail = ""
+                            Toast.makeText(
+                                ctx,
+                                if (language == AppLanguage.AR) "وصلتنا! شكرًا لملاحظاتك" else "Sent! Thanks for your feedback",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                ctx,
+                                if (language == AppLanguage.AR) "فشل الإرسال — تحقق من اتصالك" else "Send failed — check your connection",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                },
+                enabled = !feedbackSending,
+                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+            ) {
+                if (feedbackSending) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        color = Color(0xFF06121F),
+                        modifier = Modifier.size(16.dp)
+                    )
+                } else {
+                    Text(
+                        text = if (language == AppLanguage.AR) "إرسال" else "SEND",
+                        style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06121F))
+                    )
+                }
+            }
+
+            if (feedbackSent) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (language == AppLanguage.AR) "✓ اتسلمت، شكرًا لوقتك" else "✓ Delivered — thank you",
+                    style = MonospaceStyle.copy(fontSize = 10.sp, color = NeonGreen)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(20.dp))
     }
 
@@ -1111,6 +1237,43 @@ fun GatewayConfigScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Send feedback to the developer's inbox via FormSubmit (no API key in the
+ * app — the service delivers the message as an email to the target address).
+ * FormSubmit requires a one-time activation: the first submission sends a
+ * confirmation email to the owner, who clicks it once; after that all
+ * submissions are delivered automatically.
+ */
+private suspend fun sendFeedbackEmail(message: String, replyEmail: String, deviceLabel: String): Boolean = withContext(Dispatchers.IO) {
+    try {
+        val url = java.net.URL("https://formsubmit.co/mhmdnsr@oversight.ee")
+        val conn = url.openConnection() as java.net.HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.connectTimeout = 15000
+        conn.readTimeout = 15000
+        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        conn.setRequestProperty("Accept", "application/json")
+
+        val emailBody = StringBuilder()
+            .append("message=").append(java.net.URLEncoder.encode(message, "UTF-8"))
+            .append("&_subject=").append(java.net.URLEncoder.encode("[Hermes Control] New feedback from $deviceLabel", "UTF-8"))
+        if (replyEmail.isNotBlank() && replyEmail.contains("@")) {
+            // Lets the developer reply directly to the user's email.
+            emailBody.append("&_replyto=").append(java.net.URLEncoder.encode(replyEmail, "UTF-8"))
+        }
+        val os = conn.outputStream
+        os.write(emailBody.toString().toByteArray(Charsets.UTF_8))
+        os.close()
+
+        val code = conn.responseCode
+        // FormSubmit returns 200 with a JSON body on success (AJAX mode).
+        code in 200..299
+    } catch (e: Exception) {
+        false
     }
 }
 

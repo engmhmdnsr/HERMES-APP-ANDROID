@@ -1,6 +1,7 @@
 package ee.oversight.hermes
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -37,10 +38,27 @@ class MainActivity : FragmentActivity() {
       }
     }
 
+    // A notification tap ("open_session" extra) tells us which session to open.
+    handleOpenSessionIntent(intent)
+
     setContent {
       HermesTheme {
         MainScreen()
       }
+    }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    // Cold-start is handled in onCreate; warm start (app already running when
+    // the notification is tapped) lands here.
+    handleOpenSessionIntent(intent)
+  }
+
+  private fun handleOpenSessionIntent(intent: Intent?) {
+    val sessionId = intent?.getStringExtra("open_session")
+    if (sessionId != null) {
+      (application as HermesApp).pendingOpenSession.value = sessionId
     }
   }
 }

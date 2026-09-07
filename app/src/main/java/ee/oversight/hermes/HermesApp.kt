@@ -15,6 +15,10 @@ class HermesApp : Application() {
         HermesViewModel(this)
     }
 
+    // Session id requested via a notification tap ("open_session" extra).
+    // Written by MainActivity, consumed by MainScreen (which then clears it).
+    val pendingOpenSession = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
@@ -46,11 +50,23 @@ class HermesApp : Application() {
                 description = "Reply ready and approval requests"
             }
         )
+
+        // New inbound messages on other sessions
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_NEW_MSG,
+                "New messages",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "A new message arrived on a session from elsewhere"
+            }
+        )
     }
 
     companion object {
         const val CHANNEL_STREAM = "hermes_stream"
         const val CHANNEL_REPLY = "hermes_reply"
+        const val CHANNEL_NEW_MSG = "hermes_new_msg"
         const val NOTIF_STREAM_ID = 1001
         const val NOTIF_REPLY_ID = 1002
     }

@@ -395,9 +395,9 @@ fun ChatTerminalScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = if (language == AppLanguage.AR)
-                            "لم يتم إعداد الاتصال بعد.\n\nاذهب إلى تبويب Gateway وأدخل:\n• عنوان IP الخاص بـ Hermes (مثل 100.x.x.x)\n• المنفذ (افتراضياً 8080)\n• مفتاح API_SERVER_KEY من ملف .env على جهازك\n\nبعد الحفظ اضغط اتصال (Connect) وسيبدأ الشات."
+                            "لم يتم إعداد الاتصال بعد.\n\nاذهب إلى تبويب الإعدادات وأدخل:\n• عنوان IP الخاص بـ Hermes (مثل 100.x.x.x)\n• المنفذ (افتراضياً 8080)\n• مفتاح API_SERVER_KEY من ملف .env على جهازك\n\nبعد الحفظ اضغط اتصال (Connect) وسيبدأ الشات."
                         else
-                            "No gateway configured yet.\n\nGo to the Gateway tab and enter:\n• Your Hermes PC IP (e.g. 100.x.x.x)\n• The port (default 8080)\n• The API_SERVER_KEY from your .env file\n\nThen tap Connect and chat will start working.",
+                            "No gateway configured yet.\n\nGo to the Settings tab and enter:\n• Your Hermes PC IP (e.g. 100.x.x.x)\n• The port (default 8080)\n• The API_SERVER_KEY from your .env file\n\nThen tap Connect and chat will start working.",
                         style = MonospaceStyle.copy(fontSize = 13.sp, color = TextSecondary, lineHeight = 21.sp)
                     )
                 }

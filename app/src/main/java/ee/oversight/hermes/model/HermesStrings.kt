@@ -40,8 +40,8 @@ object HermesStrings {
         AppLanguage.EN -> "TELEMETRY"
     }
     fun tabGateway(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "البوابة"
-        AppLanguage.EN -> "GATEWAY"
+        AppLanguage.AR -> "الإعدادات"
+        AppLanguage.EN -> "SETTINGS"
     }
 
     // Chat Screen

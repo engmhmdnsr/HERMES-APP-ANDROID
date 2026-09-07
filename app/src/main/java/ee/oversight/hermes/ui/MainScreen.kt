@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -112,6 +113,18 @@ fun MainScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val isImeVisible = WindowInsets.isImeVisible
+
+    // A notification tap requested a specific session to open
+    // ("open_session" extra set by MainActivity). Consume it once.
+    val pendingOpenSession by app.pendingOpenSession.collectAsState()
+    LaunchedEffect(pendingOpenSession) {
+        val sid = pendingOpenSession
+        if (sid != null) {
+            vm.selectSession(sid)
+            vm.setActiveTab(AppTab.CHAT)
+            app.pendingOpenSession.value = null
+        }
+    }
 
     CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
         Box(modifier = Modifier.fillMaxSize()) {
