@@ -553,7 +553,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         // If the user already has a saved config, try connecting automatically.
-        if (_config.value.tailscaleIp.isNotBlank()) {
+        if (_config.value.isConfigured) {
             testPing()
         }
     }
@@ -570,7 +570,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                                 return@launch
                             }
                             HermesAppLog.info("Network reconnected. Triggering auto-recovery...")
-                            if (_config.value.tailscaleIp.isNotBlank()) {
+                            if (_config.value.isConfigured) {
                                 testPing()
                                 loadSessions()
                             }
@@ -738,7 +738,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             var consecutiveFailures = 0
             while (isActive) {
                 // Only poll when we have a target configured
-                if (_config.value.tailscaleIp.isBlank()) {
+                if (!_config.value.isConfigured) {
                     delay(3000)
                     continue
                 }
@@ -780,7 +780,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     fun setActiveTab(tab: AppTab) {
         val prev = _activeTab.value
         _activeTab.value = tab
-        if (tab == AppTab.TELEMETRY && prev != AppTab.TELEMETRY && _config.value.tailscaleIp.isNotBlank()) {
+        if (tab == AppTab.TELEMETRY && prev != AppTab.TELEMETRY && _config.value.isConfigured) {
             viewModelScope.launch {
                 val result = networkClient.fetchMetrics(_config.value)
                 result.getOrNull()?.let { _telemetry.value = it }
@@ -807,7 +807,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 val sid = _currentSessionId.value
                 val streaming = _isStreaming.value
-                val hasConfig = _config.value.tailscaleIp.isNotBlank()
+                val hasConfig = _config.value.isConfigured
                 // Fetch on every visible tab (the screen-interactive check above
                 // already skips when the screen is off): external messages
                 // (Telegram/desktop) then appear instantly when the user returns
@@ -817,17 +817,14 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     result.onSuccess { msgs ->
                         if (msgs.isNotEmpty()) {
                             val currentMsgs = _chatMessagesBySession.value[sid] ?: emptyList()
+                            // Build a map of existing messages by id for O(1) lookup
+                            val existingMap = currentMsgs.associateBy { it.id }
                             val merged = msgs.map { newMsg ->
-                                val existing = currentMsgs.find {
-                                    it.id == newMsg.id || (it.sender == newMsg.sender && it.content == newMsg.content)
-                                }
+                                val existing = existingMap[newMsg.id]
                                 if (existing != null) {
                                     newMsg.copy(
                                         toolExecutions = if (newMsg.toolExecutions.isEmpty()) existing.toolExecutions else newMsg.toolExecutions,
                                         attachments = if (newMsg.attachments.isEmpty()) existing.attachments else newMsg.attachments,
-                                        // Thinking never comes back from the server (SSE-only), so
-                                        // keep the locally streamed reasoning, else the 8s poll
-                                        // wipes it once the reply finishes.
                                         thinkingContent = if (existing.thinkingContent.isNotBlank()) existing.thinkingContent else newMsg.thinkingContent,
                                         thinkingDone = existing.thinkingDone || newMsg.thinkingDone
                                     )
@@ -841,7 +838,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                 }
-                delay(8000)
+                delay(30000)
             }
         }
     }
@@ -884,7 +881,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     fun getActiveProfileName(): String = prefsRepo.getActiveProfileName()
 
     fun connectToSaved() {
-        if (_config.value.tailscaleIp.isNotBlank()) {
+        if (_config.value.isConfigured) {
             testPing()
         }
     }
@@ -925,7 +922,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun loadSessions() {
-        if (_config.value.tailscaleIp.isBlank()) return
+        if (!_config.value.isConfigured) return
         viewModelScope.launch {
             _isLoadingSessions.value = true
             val result = networkClient.fetchSessions(_config.value, offset = 0, limit = 100)
@@ -993,7 +990,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Load the next page of sessions (append to the list) — "Load more" in the drawer. */
     fun loadMoreSessions() {
-        if (_config.value.tailscaleIp.isBlank() || !_sessionsHasMore.value || _isLoadingMoreSessions.value) return
+        if (!_config.value.isConfigured || !_sessionsHasMore.value || _isLoadingMoreSessions.value) return
         viewModelScope.launch {
             _isLoadingMoreSessions.value = true
             val offset = _sessions.value.size
@@ -1072,7 +1069,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     // Cron jobs
     // ------------------------------------------------------------------
     fun loadJobs() {
-        if (_config.value.tailscaleIp.isBlank()) return
+        if (!_config.value.isConfigured) return
         viewModelScope.launch {
             _isLoadingJobs.value = true
             networkClient.fetchJobs(_config.value)
@@ -1271,7 +1268,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun refreshModels() {
-        if (_config.value.tailscaleIp.isBlank()) return
+        if (!_config.value.isConfigured) return
         viewModelScope.launch {
             val result = networkClient.fetchModels(_config.value)
             result.onSuccess { models ->
@@ -1685,7 +1682,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         // alone would leave Hermes executing tools on the PC.
         val runId = _activeRunId
         _activeRunId = null
-        if (runId != null && _config.value.tailscaleIp.isNotBlank()) {
+        if (runId != null && _config.value.isConfigured) {
             viewModelScope.launch {
                 networkClient.stopRun(_config.value, runId)
                     .onSuccess { HermesAppLog.info("Run $runId cancelled server-side") }

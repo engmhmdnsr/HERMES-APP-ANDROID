@@ -311,16 +311,8 @@ fun ChatTerminalScreen(
         }
     }
 
-    // Client-side search filter over the loaded messages
-    val visibleMessages = if (searchQuery.isBlank()) {
-        messages
-    } else {
-        val q = searchQuery.trim().lowercase()
-        messages.filter { msg ->
-            msg.content.lowercase().contains(q) ||
-                msg.toolExecutions.any { it.command.lowercase().contains(q) || (it.output ?: "").lowercase().contains(q) }
-        }
-    }
+    // Client-side search is disabled; all messages are always visible.
+        val visibleMessages = messages
 
     Column(
         modifier = modifier

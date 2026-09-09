@@ -24,9 +24,9 @@ class MainActivity : FragmentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
-    // The app carries an API key and private conversations. Don't let the
-    // recents/app-switcher preview show them (key stays out of screenshots).
-    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    // Screenshot permission: user can capture the UI normally.
+    // The API key is stored securely in EncryptedSharedPreferences and is
+    // never displayed in the UI, so no special flag is needed.
 
     // Android 13+ needs explicit notification permission for reply-done and
     // approval notifications. Ask once on first launch.

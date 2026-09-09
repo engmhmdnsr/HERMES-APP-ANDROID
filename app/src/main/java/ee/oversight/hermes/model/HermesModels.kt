@@ -42,6 +42,13 @@ data class ConnectionConfig(
 
     val baseUrl: String
         get() = effectiveGatewayUrl
+
+    /** True when the user has entered SOMETHING to connect to (either a
+     *  custom gateway URL or a Tailscale/LAN IP). All polling/auto-connect
+     *  gates should check this, NOT tailscaleIp alone — otherwise a custom
+     *  URL with an empty IP field disables every background poll. */
+    val isConfigured: Boolean
+        get() = (useCustomGatewayUrl && remoteGatewayUrl.isNotBlank()) || tailscaleIp.isNotBlank()
 }
 
 data class SystemTelemetry(
