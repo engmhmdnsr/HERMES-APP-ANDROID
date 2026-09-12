@@ -7,6 +7,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -73,6 +77,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
@@ -115,6 +120,7 @@ import ee.oversight.hermes.ui.theme.TextSecondary
  *  - API key help simplified to .env only
  *  - About us at the bottom (with non-official disclaimer)
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GatewayConfigScreen(
     config: ConnectionConfig,
@@ -169,6 +175,7 @@ fun GatewayConfigScreen(
     var feedbackSending by remember { mutableStateOf(false) }
     var feedbackSent by remember { mutableStateOf(false) }
     val feedbackScope = rememberCoroutineScope()
+    val feedbackBringIntoView = remember { BringIntoViewRequester() }
 
     Column(
         modifier = modifier
@@ -176,6 +183,7 @@ fun GatewayConfigScreen(
             .background(CyberBg)
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
+            .imePadding()
     ) {
         // ===== Header =====
         Text(
@@ -1167,7 +1175,10 @@ fun GatewayConfigScreen(
                 maxLines = 6,
                 textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
                 colors = fieldColors(),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(feedbackBringIntoView)
+                    .onFocusChanged { if (it.isFocused) feedbackScope.launch { feedbackBringIntoView.bringIntoView() } }
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -1180,7 +1191,10 @@ fun GatewayConfigScreen(
                 singleLine = true,
                 textStyle = MonospaceStyle.copy(color = TextPrimary, fontSize = 12.sp),
                 colors = fieldColors(),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(feedbackBringIntoView)
+                    .onFocusChanged { if (it.isFocused) feedbackScope.launch { feedbackBringIntoView.bringIntoView() } }
             )
 
             Spacer(modifier = Modifier.height(10.dp))

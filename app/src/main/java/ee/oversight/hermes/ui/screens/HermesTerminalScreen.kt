@@ -661,13 +661,14 @@ fun HermesTerminalScreen(
             }
         }
 
-        // Command Input Line
+        // Command Input Line (lifts above keyboard via imePadding)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF0F1420))
                 .border(1.dp, CyberSurfaceBorder)
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .imePadding(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Prompt Prefix
