@@ -348,10 +348,15 @@ fun HermesTerminalScreen(
         }
     }
 
-    // Auto-scroll to bottom on new output
+    // Auto-scroll to bottom on new output, only while the user is already
+    // at the bottom (reading history above must never yank the viewport).
     LaunchedEffect(logEntries.size, logEntries.lastOrNull()?.output) {
         if (logEntries.isNotEmpty()) {
-            listState.animateScrollToItem(logEntries.size - 1)
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+            val atBottom = last == null || last.index >= logEntries.size - 2
+            if (atBottom) {
+                listState.scrollToItem(logEntries.size - 1)
+            }
         }
     }
 

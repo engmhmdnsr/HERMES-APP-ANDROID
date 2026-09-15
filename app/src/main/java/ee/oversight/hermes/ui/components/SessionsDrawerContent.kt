@@ -100,7 +100,17 @@ enum class SessionSourceFilter {
     DESKTOP,
     API_SERVER,
     TELEGRAM,
-    MOBILE
+    MOBILE,
+    CRON
+}
+
+/** Cron/scheduled sessions: identified by source or by the server's "cron | ..." title prefix. */
+fun isCronSession(s: HermesSession): Boolean {
+    if (s.source.contains("cron", ignoreCase = true) ||
+        s.source.contains("job", ignoreCase = true) ||
+        s.source.contains("schedul", ignoreCase = true)
+    ) return true
+    return s.title.trimStart().startsWith("cron", ignoreCase = true)
 }
 
 enum class SessionSortOrder {
@@ -156,19 +166,21 @@ fun SessionsDrawerContent(
             SessionTabFilter.ARCHIVED -> sessions.filter { it.isArchived }
         }
 
-        // Source filter (Telegram / other gateways / desktop / mobile)
+        // Source filter (Telegram / other gateways / desktop / mobile / cron).
+        // Cron sessions live in their own CRON list and are excluded everywhere else.
         list = when (sourceFilter) {
-            SessionSourceFilter.ALL_SOURCES -> list
-            SessionSourceFilter.DESKTOP -> list.filter { it.source.equals("desktop", true) }
+            SessionSourceFilter.ALL_SOURCES -> list.filter { !isCronSession(it) }
+            SessionSourceFilter.DESKTOP -> list.filter { it.source.equals("desktop", true) && !isCronSession(it) }
             SessionSourceFilter.API_SERVER -> list.filter {
-                it.source.equals("api_server", true) || it.source.equals("api", true)
+                (it.source.equals("api_server", true) || it.source.equals("api", true)) && !isCronSession(it)
             }
             SessionSourceFilter.TELEGRAM -> list.filter {
-                it.source.contains("telegram", ignoreCase = true)
+                it.source.contains("telegram", ignoreCase = true) && !isCronSession(it)
             }
             SessionSourceFilter.MOBILE -> list.filter {
-                it.source.equals("mobile_app", true) || it.source.equals("mobile", true) || it.source.equals("android", true)
+                (it.source.equals("mobile_app", true) || it.source.equals("mobile", true) || it.source.equals("android", true)) && !isCronSession(it)
             }
+            SessionSourceFilter.CRON -> list.filter { isCronSession(it) }
         }
 
         if (searchQuery.isNotBlank()) {
@@ -512,7 +524,8 @@ fun SessionsDrawerContent(
                 SessionSourceFilter.TELEGRAM to "Telegram",
                 SessionSourceFilter.DESKTOP to "Desktop",
                 SessionSourceFilter.API_SERVER to "API",
-                SessionSourceFilter.MOBILE to (if (language == AppLanguage.AR) "الموبايل" else "Mobile")
+                SessionSourceFilter.MOBILE to (if (language == AppLanguage.AR) "الموبايل" else "Mobile"),
+                SessionSourceFilter.CRON to "Cron"
             )
             items(sourceChips) { (filter, label) ->
                 val isSelected = sourceFilter == filter

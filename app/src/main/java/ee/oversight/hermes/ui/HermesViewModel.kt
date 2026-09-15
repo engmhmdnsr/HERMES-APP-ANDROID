@@ -222,6 +222,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     // Interactive Approval Cards & Control Modes
     private val _activeApprovalRequest = MutableStateFlow<ApprovalRequest?>(null)
     val activeApprovalRequest: StateFlow<ApprovalRequest?> = _activeApprovalRequest.asStateFlow()
+    // Run ids the user already decided on (approved/denied) so the pending
+    // poll never re-surfaces them while the server run is still parked.
+    private val handledApprovalRunIds = mutableSetOf<String>()
 
     private val _globalAutoApprove = MutableStateFlow(prefsRepo.getGlobalAutoApprove())
     val globalAutoApprove: StateFlow<Boolean> = _globalAutoApprove.asStateFlow()
@@ -229,10 +232,27 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     private val _sessionAutoApproveIds = MutableStateFlow<Set<String>>(emptySet())
     val sessionAutoApproveIds: StateFlow<Set<String>> = _sessionAutoApproveIds.asStateFlow()
 
+    /**
+     * Direct setter — the caller MUST show an explicit confirmation dialog
+     * before invoking this. For the biometric-gated entry point see
+     * [requestGlobalAutoApprove].
+     */
     fun setGlobalAutoApprove(enabled: Boolean) {
         _globalAutoApprove.value = enabled
         prefsRepo.saveGlobalAutoApprove(enabled)
         HermesAppLog.info("Global Auto-Approve set to: $enabled")
+    }
+
+    /**
+     * Gate for enabling Global Auto-Approve. Returns false while the
+     * biometric app lock is enabled and the user has not unlocked yet —
+     * the caller must abort the enable flow in that case. Returns true
+     * when it is safe to proceed (caller still shows the confirm dialog,
+     * then calls [setGlobalAutoApprove]).
+     */
+    fun requestGlobalAutoApprove(): Boolean {
+        if (_biometricLockEnabled.value && _needsBiometricUnlock.value) return false
+        return true
     }
 
     fun isSessionAutoApproved(sessionId: String?): Boolean {
@@ -275,11 +295,22 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
+            val choice = if (!approved) {
+                "deny"
+            } else {
+                when (mode) {
+                    ApprovalMode.ALLOW_ALL -> "always"
+                    ApprovalMode.ALLOW_SESSION -> "session"
+                    ApprovalMode.MANUAL -> "once"
+                }
+            }
             val result = networkClient.submitApproval(
                 config = _config.value,
                 runId = request.runId,
                 approved = approved,
-                sessionId = request.sessionId ?: _currentSessionId.value
+                sessionId = request.sessionId ?: _currentSessionId.value,
+                choice = choice,
+                requestId = request.requestId
             )
 
             val resolutionBadge = if (approved) {
@@ -297,7 +328,32 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 HermesAppLog.error("Approval resolution FAILED ($resolutionBadge): ${result.exceptionOrNull()?.message}")
                 notifyApprovalFailed(request.runId, approved)
             }
+            handledApprovalRunIds.add(request.runId)
             _activeApprovalRequest.value = null
+        }
+    }
+
+    /**
+     * Poll GET /v1/approvals/pending so approval requests raised by runs
+     * this device did not start (e.g. laptop/desktop sessions) still show
+     * up as an approval card + notification. Skips runs already on screen
+     * or already decided on. Silent on old servers (404 = empty).
+     */
+    fun checkPendingApprovals() {
+        if (!_config.value.isConfigured || _isStreaming.value) return
+        viewModelScope.launch {
+            val cfg = _config.value
+            networkClient.fetchPendingApprovals(cfg).onSuccess { pendings ->
+                val current = _activeApprovalRequest.value
+                val fresh = pendings.firstOrNull { p ->
+                    p.runId !in handledApprovalRunIds && p.runId != current?.runId
+                } ?: return@onSuccess
+                if (current == null) {
+                    _activeApprovalRequest.value = fresh
+                    HermesAppLog.info("External approval requested: ${fresh.command} (${fresh.runId})")
+                }
+                if (canPostNotifications()) notifyApproval(fresh)
+            }
         }
     }
 
@@ -625,10 +681,11 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             discovered.ip
         }
+        // NOTE: never auto-fill the API key from the UDP beacon — the user
+        // enters the key manually. Keep the currently saved key untouched.
         val updated = _config.value.copy(
             tailscaleIp = targetIp,
             port = discovered.port,
-            apiKey = discovered.apiKey.ifEmpty { _config.value.apiKey },
             useCustomGatewayUrl = false
         )
         updateConnectionConfig(updated)
@@ -658,7 +715,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     continue
                 }
                 val cfg = _config.value
-                if (cfg.tailscaleIp.isBlank()) {
+                if (!cfg.isConfigured) {
                     delay(5000)
                     continue
                 }
@@ -702,6 +759,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     // drawer while the app is open. Poll every cycle (~15s) for
                     // near-real-time updates; more aggressive would cost battery.
                     loadSessions()
+                    // Surface approval requests raised elsewhere (laptop /
+                    // desktop runs) as a card + notification.
+                    checkPendingApprovals()
                     // Refresh gateway health status (official endpoint, works on
                     // every stock server) — powers the System tab.
                     viewModelScope.launch {
@@ -921,10 +981,23 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun loadSessions() {
+    /**
+     * Load sessions (drawer list). When [triggerSync] is true (manual refresh
+     * button / pull-to-refresh) first ask the server for an immediate
+     * laptop<->VPS sync pass, wait briefly for it, then load — so refresh
+     * also brings the newest desktop/Telegram state. Failures are ignored:
+     * refresh must work even on servers without the sync endpoint.
+     */
+    fun loadSessions(triggerSync: Boolean = false) {
         if (!_config.value.isConfigured) return
         viewModelScope.launch {
             _isLoadingSessions.value = true
+            if (triggerSync) {
+                try {
+                    networkClient.requestSessionSync(_config.value)
+                } catch (_: Exception) { /* best-effort */ }
+                delay(3500)
+            }
             val result = networkClient.fetchSessions(_config.value, offset = 0, limit = 100)
             result.onSuccess { page ->
                 val list = page.sessions
@@ -1522,12 +1595,15 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                                 val autoApprove = _globalAutoApprove.value || (streamSessionId != null && _sessionAutoApproveIds.value.contains(streamSessionId))
                                 if (autoApprove) {
                                     HermesAppLog.info("Auto-approving run ${req.runId} (${req.command})")
+                                    val autoChoice = if (_globalAutoApprove.value) "always" else "session"
                                     viewModelScope.launch {
                                         val r = networkClient.submitApproval(
                                             _config.value,
                                             req.runId,
                                             approved = true,
-                                            sessionId = streamSessionId
+                                            sessionId = streamSessionId,
+                                            choice = autoChoice,
+                                            requestId = req.requestId
                                         )
                                         if (r.isFailure) {
                                             HermesAppLog.error("Auto-approve FAILED for run ${req.runId}: ${r.exceptionOrNull()?.message}")
@@ -1623,9 +1699,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
             // Auto-send anything queued while the previous run was in progress.
             val queued = _queuedMessages.value
             if (queued.isNotEmpty()) {
-                _queuedMessages.update { it.drop(1) }
                 val next = queued.first()
                 if (next.sessionId == null || next.sessionId == _currentSessionId.value) {
+                    _queuedMessages.update { it.drop(1) }
                     HermesAppLog.info("Draining queue: sending queued message (${next.prompt.take(40)})")
                     doSendMessage(next.prompt, next.attachments)
                 } else {
@@ -1652,6 +1728,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     return@launch
                 }
                 HermesAppLog.info("Approval from notification: ${if (approved) "APPROVED" else "DENIED"} ($runId)")
+                handledApprovalRunIds.add(runId)
                 // Cancel the notification
                 try {
                     val nm = getApplication<Application>().getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager

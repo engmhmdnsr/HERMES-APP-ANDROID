@@ -132,12 +132,14 @@ class HermesNetworkClient {
                     if (json.optString("service") == "hermes-agent") {
                         val senderIp = json.optString("ip").ifEmpty { receivePacket.address.hostAddress ?: "127.0.0.1" }
                         val tsIp = json.optString("tailscale_ip").takeIf { it.isNotBlank() && it != "null" }
+                        // P0-01: broadcast beacons must never provision credentials.
+                        // DiscoveredGateway.apiKey stays for compat but discovery always leaves it empty.
                         return@withContext DiscoveredGateway(
-                            hostname = json.optString("hostname", "WIN11-HERMES"),
+                            hostname = json.optString("hostname", "HERMES-GATEWAY"),
                             ip = senderIp,
                             tailscaleIp = tsIp,
                             port = json.optInt("port", 8080),
-                            apiKey = json.optString("apiKey", json.optString("api_key", ""))
+                            apiKey = ""
                         )
                     }
                 } catch (_: Exception) {
@@ -376,7 +378,7 @@ class HermesNetworkClient {
                 }
                 // Sort newest first
                 list.sortByDescending { it.startedAt }
-                val hasMore = json.optBoolean("has_more", false)
+                val hasMore = if (json.has("has_more")) json.optBoolean("has_more", false) else list.size >= limit
                 Result.success(SessionPage(sessions = list, hasMore = hasMore))
             }
         } catch (e: Exception) {
@@ -511,6 +513,31 @@ class HermesNetworkClient {
                     lastActiveAt = (sessionObj.optDouble("started_at", 0.0) * 1000).toLong().takeIf { it > 0 } ?: System.currentTimeMillis()
                 )
                 Result.success(session)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Manual sync: POST /api/session-sync  ({} body)
+    // Asks the laptop sync loop to run an uncapped pass immediately, so a
+    // manual refresh in the app also pulls the newest desktop/Telegram state.
+    // Best-effort: returns failure on old servers (404) — callers must ignore
+    // it and still load sessions, never break refresh on this.
+    // ------------------------------------------------------------------
+    suspend fun requestSessionSync(config: ConnectionConfig): Result<Double> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/api/session-sync"
+            val body = "{}".toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).authHeaders(config).post(body).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@use Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val ts = JSONObject(bodyStr).optDouble("requested_at", 0.0)
+                Result.success(ts)
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -701,6 +728,7 @@ class HermesNetworkClient {
             val response = call.execute()
             if (!response.isSuccessful) {
                 val errBody = response.body?.string() ?: ""
+                response.close()
                 emit(StreamChunk.Error("Server error: HTTP ${response.code} ${errBody.take(300)}"))
                 return@flow
             }
@@ -826,6 +854,7 @@ class HermesNetworkClient {
                                 eventName == "approval.request" || eventName == "approval_required" || json.optString("type") == "approval.request" -> {
                                     val runId = json.optString("run_id", json.optString("id", System.currentTimeMillis().toString()))
                                     val callId = if (json.has("call_id")) json.getString("call_id") else null
+                                    val requestId = json.optString("request_id", "").takeIf { it.isNotBlank() }
                                     val tool = json.optString("tool", json.optString("tool_name", "terminal"))
                                     val command = json.optString("command", json.optString("payload", json.optString("preview", "")))
                                     val reason = json.optString("reason", "")
@@ -834,6 +863,7 @@ class HermesNetworkClient {
                                         ee.oversight.hermes.model.ApprovalRequest(
                                             runId = runId,
                                             callId = callId,
+                                            requestId = requestId,
                                             sessionId = resolvedSessionId,
                                             toolName = tool,
                                             command = command,
@@ -913,61 +943,86 @@ class HermesNetworkClient {
         }
     }
 
+    // Server contract (verified in hermes-agent api_server_runs.py):
+    // POST /v1/runs/{run_id}/approval with {"choice": once|session|always|deny}.
+    // The old {"approved": bool} body was ALWAYS rejected with 400, so every
+    // app approval failed. There is no /api/sessions/{id}/approval route.
     suspend fun submitApproval(
         config: ConnectionConfig,
         runId: String,
         approved: Boolean,
-        sessionId: String? = null
+        sessionId: String? = null,
+        choice: String? = null,
+        requestId: String? = null
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
+            val effectiveChoice = choice ?: if (approved) "once" else "deny"
             val payload = JSONObject().apply {
-                put("approved", approved)
+                put("choice", effectiveChoice)
+                if (requestId != null) put("request_id", requestId)
                 if (sessionId != null) put("session_id", sessionId)
                 put("run_id", runId)
             }
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val body = payload.toString().toRequestBody(mediaType)
-
-            // Try /v1/runs/{runId}/approval first
-            val urlPrimary = "${config.baseUrl}/v1/runs/$runId/approval"
-            var lastError: String? = null
+            val url = "${config.baseUrl}/v1/runs/$runId/approval"
             try {
-                val reqPrimary = Request.Builder()
-                    .url(urlPrimary)
+                val req = Request.Builder()
+                    .url(url)
                     .authHeaders(config)
                     .post(body)
                     .build()
-                client.newCall(reqPrimary).execute().use { resp ->
+                client.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) return@withContext Result.success(true)
-                    lastError = "HTTP ${resp.code}"
+                    val errBody = resp.body?.string()?.take(200) ?: ""
+                    return@withContext Result.failure(
+                        Exception("Approval submission failed: HTTP ${resp.code} $errBody")
+                    )
                 }
             } catch (e: Exception) {
-                lastError = e.message ?: "network error"
+                Result.failure(e)
             }
-
-            // Fallback to /api/sessions/{sessionId}/approval if sessionId available
-            if (sessionId != null) {
-                val urlFallback = "${config.baseUrl}/api/sessions/$sessionId/approval"
-                try {
-                    val reqFallback = Request.Builder()
-                        .url(urlFallback)
-                        .authHeaders(config)
-                        .post(body)
-                        .build()
-                    client.newCall(reqFallback).execute().use { resp ->
-                        if (resp.isSuccessful) return@withContext Result.success(true)
-                        lastError = "HTTP ${resp.code}"
-                    }
-                } catch (e: Exception) {
-                    lastError = e.message ?: "network error"
-                }
-            }
-            Result.failure(Exception("Approval submission failed: $lastError"))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
+    // Pending approvals raised by runs this device did not start (e.g.
+    // laptop/desktop sessions). 404 on old servers = empty, never an error.
+    suspend fun fetchPendingApprovals(
+        config: ConnectionConfig
+    ): Result<List<ee.oversight.hermes.model.ApprovalRequest>> = withContext(Dispatchers.IO) {
+        try {
+            val url = "${config.baseUrl}/v1/approvals/pending"
+            val request = Request.Builder().url(url).authHeaders(config).get().build()
+            client.newCall(request).execute().use { response ->
+                if (response.code == 404) return@use Result.success(emptyList())
+                if (!response.isSuccessful) {
+                    return@use Result.failure(Exception("HTTP ${response.code}"))
+                }
+                val bodyStr = response.body?.string() ?: "{}"
+                val arr = JSONObject(bodyStr).optJSONArray("approvals") ?: return@use Result.success(emptyList())
+                val out = mutableListOf<ee.oversight.hermes.model.ApprovalRequest>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    out.add(
+                        ee.oversight.hermes.model.ApprovalRequest(
+                            runId = o.optString("run_id", ""),
+                            requestId = o.optString("request_id", "").takeIf { it.isNotBlank() },
+                            sessionId = o.optString("session_id", "").takeIf { it.isNotBlank() },
+                            toolName = o.optString("tool", "terminal"),
+                            command = o.optString("command", ""),
+                            reason = o.optString("reason", ""),
+                            message = o.optString("message", "")
+                        )
+                    )
+                }
+                Result.success(out.filter { it.runId.isNotBlank() })
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
     // ------------------------------------------------------------------
     // Cron jobs: /api/jobs (full CRUD)
     // ------------------------------------------------------------------

@@ -87,6 +87,7 @@ enum class ApprovalMode {
 data class ApprovalRequest(
     val runId: String,
     val callId: String? = null,
+    val requestId: String? = null,
     val sessionId: String? = null,
     val toolName: String = "terminal",
     val command: String = "",

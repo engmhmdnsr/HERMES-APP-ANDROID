@@ -39,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import ee.oversight.hermes.BuildConfig
 import ee.oversight.hermes.ui.components.BiometricLockGate
 import ee.oversight.hermes.ui.components.SessionsDrawerContent
 import kotlinx.coroutines.launch
@@ -191,7 +192,7 @@ fun MainScreen(
                         isLoadingMoreSessions = isLoadingMoreSessions,
                         onLoadMoreSessions = { vm.loadMoreSessions() },
                         onRefreshSessions = {
-                            vm.loadSessions()
+                            vm.loadSessions(triggerSync = true)
                         },
                         onClose = {
                             scope.launch { drawerState.close() }
@@ -220,9 +221,9 @@ fun MainScreen(
                         onToggleGlobalAutoApprove = { enabled ->
                             vm.setGlobalAutoApprove(enabled)
                         },
-                        onTriggerTestApproval = {
+                        onTriggerTestApproval = if (!BuildConfig.DEBUG) null else ({
                             vm.triggerMockApproval()
-                        },
+                        }),
                         onToggleConnection = { on ->
                             if (on) {
                                 vm.connectToSaved()

@@ -25,7 +25,7 @@ class StreamService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startForegroundCompat() {

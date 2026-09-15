@@ -179,6 +179,7 @@ fun ChatTerminalScreen(
     var promptInput by remember { mutableStateOf("") }
     var showAllModelsSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var isChatSearchVisible by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // Image attachments picked for the next message (data URLs)
     var pendingImages by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -250,6 +251,17 @@ fun ChatTerminalScreen(
     var isProgrammaticScroll by remember { mutableStateOf(false) }
     var prevMessagesSize by remember { mutableStateOf(0) }
 
+    // In-session search: filter messages by content/sender when a query is typed.
+    val visibleMessages = remember(messages, searchQuery) {
+        val q = searchQuery.trim().lowercase()
+        if (q.isBlank()) messages
+        else messages.filter { m ->
+            m.content.lowercase().contains(q) ||
+                m.thinkingContent.lowercase().contains(q) ||
+                m.sender.name.lowercase().contains(q)
+        }
+    }
+
     // Detect user-initiated vs programmatic scrolling
     LaunchedEffect(listState, messages.size) {
         snapshotFlow {
@@ -281,7 +293,7 @@ fun ChatTerminalScreen(
         isStreaming
     ) {
         val sid = currentSessionId
-        if (messages.isNotEmpty()) {
+        if (visibleMessages.isNotEmpty()) {
             val isNewSession = sid != null && lastScrolledSession != sid
             val isNewMessage = messages.size > prevMessagesSize
             prevMessagesSize = messages.size
@@ -290,7 +302,7 @@ fun ChatTerminalScreen(
                 userFollows = true
             }
 
-            val lastIndex = messages.size - 1
+            val lastIndex = visibleMessages.size - 1
             if (isNewSession) {
                 userFollows = true
                 isProgrammaticScroll = true
@@ -311,16 +323,16 @@ fun ChatTerminalScreen(
         }
     }
 
-    // Client-side search is disabled; all messages are always visible.
-        val visibleMessages = messages
+    // (visibleMessages is computed above so auto-scroll can clamp to it.)
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(CyberBg)
     ) {
-        // In-session search bar (client-side)
-        if (searchQuery.isNotBlank() || messages.size > 15) {
+        // In-session search bar (client-side). Hidden by default behind a
+        // floating search icon so it never eats screen space.
+        if (isChatSearchVisible) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -354,7 +366,10 @@ fun ChatTerminalScreen(
                     )
                 )
                 if (searchQuery.isNotBlank()) {
-                    IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                    IconButton(
+                        onClick = { searchQuery = ""; isChatSearchVisible = false },
+                        modifier = Modifier.size(24.dp)
+                    ) {
                         Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
                     }
                 }
@@ -367,7 +382,7 @@ fun ChatTerminalScreen(
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            if (config.tailscaleIp.isBlank()) {
+            if (!config.isConfigured) {
                 // First-run onboarding: no gateway configured yet — guide the user
                 // to the Gateway tab instead of showing an empty chat.
                 Column(
@@ -429,6 +444,27 @@ fun ChatTerminalScreen(
             }
             } // end else (config set)
 
+            // Floating search icon (opens the in-session search bar; hidden by default)
+            if (!isChatSearchVisible && messages.size > 15) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(end = 16.dp, top = 8.dp)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(CyberSurfaceElevated.copy(alpha = 0.9f))
+                        .border(1.dp, CyberSurfaceBorder, CircleShape)
+                        .clickable { isChatSearchVisible = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search messages",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
             // Floating Scroll-To-Bottom Button
             val canScrollDown = remember {
                 derivedStateOf { listState.canScrollForward }
@@ -539,7 +575,14 @@ fun ChatTerminalScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 pendingImages.forEach { imgUrl ->
-                    val bitmap = remember(imgUrl) { dataUrlToBitmap(imgUrl).asImageBitmap() }
+                    var thumb by remember(imgUrl) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                    LaunchedEffect(imgUrl) {
+                        thumb = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            try { dataUrlToBitmap(imgUrl).asImageBitmap() } catch (_: Exception) { null }
+                        }
+                    }
+                    val bitmap = thumb
+                    if (bitmap == null) return@forEach
                     Box {
                         androidx.compose.foundation.Image(
                             bitmap = bitmap,
@@ -1052,9 +1095,16 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                     // Attachment images (if any)
                     if (message.attachments.isNotEmpty()) {
                         message.attachments.forEach { imgUrl ->
-                            val bitmap = remember(imgUrl) { dataUrlToBitmap(imgUrl).asImageBitmap() }
+                            var userThumb by remember(imgUrl) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                            LaunchedEffect(imgUrl) {
+                                userThumb = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    try { dataUrlToBitmap(imgUrl).asImageBitmap() } catch (_: Exception) { null }
+                                }
+                            }
+                            val userBitmap = userThumb
+                            if (userBitmap == null) return@forEach
                             androidx.compose.foundation.Image(
-                                bitmap = bitmap,
+                                bitmap = userBitmap,
                                 contentDescription = "Image",
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1168,13 +1218,14 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                 }
             }
 
-            // Message Bubble Card
+            // Message Bubble Card (Hermes replies use a teal tint so they never
+            // look like the user's violet bubble)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp))
-                    .background(CyberSurface)
-                    .border(1.dp, CyberSurfaceBorder, RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp))
+                    .background(Color(0xFF0D2231))
+                    .border(1.dp, NeonCyan.copy(alpha = 0.35f), RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 14.dp))
                     .padding(14.dp)
             ) {
                 // Thinking / Reasoning section (dimmed, collapses when the real reply starts)
@@ -1687,7 +1738,8 @@ fun ChatInputBar(
                     color = TextPrimary
                 ),
                 cursorBrush = SolidColor(NeonCyan),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSend() }),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("chat_input_field")

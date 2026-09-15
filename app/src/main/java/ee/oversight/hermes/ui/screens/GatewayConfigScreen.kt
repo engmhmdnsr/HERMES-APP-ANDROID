@@ -546,9 +546,9 @@ fun GatewayConfigScreen(
                 // Where to get the key - SIMPLE, .env only
                 Text(
                     text = if (language == AppLanguage.AR)
-                        "💡 المفتاح من ملف .env على جهاز الـ PC: افتح %LOCALAPPDATA%\\hermes\\.env وانسخ القيمة بعد API_SERVER_KEY="
+                        "💡 المفتاح من ملف .env على جهاز الـ host: ويندوز %LOCALAPPDATA%\\hermes\\.env ، لينكس/ماك ~/.hermes/.env ، انسخ القيمة بعد API_SERVER_KEY="
                     else
-                        "💡 Key is in .env on the PC: open %LOCALAPPDATA%\\hermes\\.env and copy the value after API_SERVER_KEY=",
+                        "💡 Key is in .env on the host: Windows %LOCALAPPDATA%\\hermes\\.env, Linux/Mac ~/.hermes/.env, copy the value after API_SERVER_KEY=",
                     style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary),
                     modifier = Modifier.padding(top = 2.dp)
                 )
