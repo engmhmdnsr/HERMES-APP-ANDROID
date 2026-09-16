@@ -122,6 +122,7 @@ import ee.oversight.hermes.model.HermesStrings
 import ee.oversight.hermes.model.MessageSender
 import ee.oversight.hermes.ui.components.InteractiveApprovalCard
 import ee.oversight.hermes.ui.components.TtsSpeaker
+import ee.oversight.hermes.ui.components.isCompactScreenWidth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -174,6 +175,7 @@ fun ChatTerminalScreen(
     queuedMessageCount: Int = 0,
     onCancelQueued: (() -> Unit)? = null,
     onGoToSettings: (() -> Unit)? = null,
+    chatFontScale: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     var promptInput by remember { mutableStateOf("") }
@@ -439,7 +441,7 @@ fun ChatTerminalScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 items(visibleMessages, key = { it.id }) { message ->
-                    ChatMessageItem(message = message, language = language)
+                    ChatMessageItem(message = message, language = language, fontScale = chatFontScale)
                 }
             }
             } // end else (config set)
@@ -668,6 +670,7 @@ fun ChatTerminalScreen(
             reasoningEffort = reasoningEffort,
             onEffortSelected = onEffortSelected,
             onAttachClick = { showAttachSheet = true },
+            compact = isCompactScreenWidth(),
             onVoiceInput = {
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -1029,7 +1032,7 @@ fun ModelsSelectionBottomSheet(
 }
 
 @Composable
-fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
+fun ChatMessageItem(message: ChatMessage, language: AppLanguage, fontScale: Float = 1f) {
     // Chat bubbles always use LTR layout (like WhatsApp/Telegram): the user's
     // message stays on the RIGHT and the agent's on the LEFT regardless of the
     // app language. Arabic text inside each bubble still renders RTL via bidi.
@@ -1120,9 +1123,9 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                             Text(
                                 text = message.content,
                                 style = MonospaceStyle.copy(
-                                    fontSize = 13.5.sp,
+                                    fontSize = 13.5.sp * fontScale,
                                     color = TextPrimary,
-                                    lineHeight = 20.sp
+                                    lineHeight = 20.sp * fontScale
                                 )
                             )
                         }
@@ -1234,7 +1237,8 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                         thinking = message.thinkingContent,
                         thinkingDone = message.thinkingDone,
                         isStreaming = message.isStreaming,
-                        language = language
+                        language = language,
+                        fontScale = fontScale
                     )
                 }
 
@@ -1254,7 +1258,8 @@ fun ChatMessageItem(message: ChatMessage, language: AppLanguage) {
                         content = message.content,
                         cursorAlpha = cursorAlpha,
                         isStreaming = message.isStreaming,
-                        language = language
+                        language = language,
+                        fontScale = fontScale
                     )
                 } else if (message.isStreaming && message.toolExecutions.isEmpty() && message.thinkingContent.isEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1284,7 +1289,8 @@ fun MessageContent(
     content: String,
     cursorAlpha: Float,
     isStreaming: Boolean,
-    language: AppLanguage
+    language: AppLanguage,
+    fontScale: Float = 1f
 ) {
     val clipboard = LocalClipboardManager.current
     val ctx = LocalContext.current
@@ -1331,7 +1337,7 @@ fun MessageContent(
                     }
                     Text(
                         text = part.text,
-                        style = MonospaceStyle.copy(fontSize = 12.sp, color = Color(0xFFD8E0EA), lineHeight = 18.sp),
+                        style = MonospaceStyle.copy(fontSize = 12.sp * fontScale, color = Color(0xFFD8E0EA), lineHeight = 18.sp * fontScale),
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
@@ -1344,9 +1350,9 @@ fun MessageContent(
                         Text(
                             text = part.text,
                             style = MonospaceStyle.copy(
-                                fontSize = 13.5.sp,
+                                fontSize = 13.5.sp * fontScale,
                                 color = TextPrimary,
-                                lineHeight = 21.sp
+                                lineHeight = 21.sp * fontScale
                             )
                         )
                         // Blinking cursor only at the very end while streaming.
@@ -1395,7 +1401,8 @@ fun ThinkingBlock(
     thinking: String,
     thinkingDone: Boolean,
     isStreaming: Boolean,
-    language: AppLanguage
+    language: AppLanguage,
+    fontScale: Float = 1f
 ) {
     var expanded by remember { mutableStateOf(false) }
     // Live (still thinking) → show Arabic "جاري التفكير"; done → compact "thinking"
@@ -1409,9 +1416,9 @@ fun ThinkingBlock(
                 Text(
                     text = thinking,
                     style = MonospaceStyle.copy(
-                        fontSize = 7.sp,
+                        fontSize = 7.sp * fontScale,
                         color = TextSecondary.copy(alpha = 0.55f),
-                        lineHeight = 10.sp
+                        lineHeight = 10.sp * fontScale
                     )
                 )
             }
@@ -1704,6 +1711,7 @@ fun ChatInputBar(
     onQueue: (() -> Unit)? = null,
     reasoningEffort: String = "medium",
     onEffortSelected: ((String) -> Unit)? = null,
+    compact: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -1754,10 +1762,12 @@ fun ChatInputBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Left Action Group: [+] [ Model Pill ]
+            // Left Action Group: [+] [ Model Pill ] (shrinks on narrow phones
+            // so the Send/Stop buttons always fit)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f, fill = false)
             ) {
                 // Attach (+) button
                 if (!isStreaming) {
@@ -1783,6 +1793,7 @@ fun ChatInputBar(
                 // Model Selector Pill [ model-name ⌄ ]
                 Row(
                     modifier = Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFF1B2332))
                         .border(1.dp, Color(0xFF384961), RoundedCornerShape(16.dp))
@@ -1792,13 +1803,15 @@ fun ChatInputBar(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = selectedModel.displayName.take(18),
+                        text = selectedModel.displayName.take(if (compact) 10 else 18),
                         style = MonospaceStyle.copy(
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = TextPrimary
                         ),
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(
@@ -1809,8 +1822,9 @@ fun ChatInputBar(
                     )
                 }
 
-                // Reasoning Effort Selector Pill [ effort ▾ ] — next to the model
-                if (onEffortSelected != null && !isStreaming) {
+                // Reasoning Effort Selector Pill [ effort ▾ ] — next to the model.
+                // Hidden in compact mode (narrow phones); effort stays as-is.
+                if (onEffortSelected != null && !isStreaming && !compact) {
                     var effortMenuOpen by remember { mutableStateOf(false) }
                     val effortLabel = when (reasoningEffort) {
                         "low" -> if (language == AppLanguage.AR) "منخفض" else "LOW"

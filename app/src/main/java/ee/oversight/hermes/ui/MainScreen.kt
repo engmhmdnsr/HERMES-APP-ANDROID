@@ -3,6 +3,8 @@ package ee.oversight.hermes.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,7 +40,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import ee.oversight.hermes.BuildConfig
 import ee.oversight.hermes.ui.components.BiometricLockGate
 import ee.oversight.hermes.ui.components.SessionsDrawerContent
@@ -115,6 +120,8 @@ fun MainScreen(
     val isLoadingJobs by vm.isLoadingJobs.collectAsState()
     val sessionsHasMore by vm.sessionsHasMore.collectAsState()
     val isLoadingMoreSessions by vm.isLoadingMoreSessions.collectAsState()
+    val activeProfileName by vm.activeProfileName.collectAsState()
+    val chatFontScale by vm.chatFontScale.collectAsState()
 
     val layoutDirection = if (language == AppLanguage.AR) LayoutDirection.Rtl else LayoutDirection.Ltr
 
@@ -135,6 +142,21 @@ fun MainScreen(
         }
     }
 
+    // Startup: a registered device with no session chosen yet opens the
+    // sessions drawer at once, so the user picks a session or starts new.
+    // Runs once per process; notification taps (pendingOpenSession) win.
+    var startupDrawerOpened by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(config.isConfigured, currentSessionId, pendingOpenSession) {
+        if (!startupDrawerOpened &&
+            config.isConfigured &&
+            currentSessionId == null &&
+            pendingOpenSession == null
+        ) {
+            startupDrawerOpened = true
+            scope.launch { drawerState.open() }
+        }
+    }
+
     // Notification "Approve" tap: after the biometric gate clears, resolve the
     // approval. If app-lock is off the gate is already open, so this runs
     // immediately; if it was on, the unlock flips needsBiometricUnlock and
@@ -149,58 +171,57 @@ fun MainScreen(
         }
     }
 
-    CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
-        Box(modifier = Modifier.fillMaxSize()) {
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            gesturesEnabled = true,
-            drawerContent = {
-                ModalDrawerSheet(
-                    drawerContainerColor = Color(0xFF0A0D15),
-                    drawerContentColor = TextPrimary,
-                    modifier = Modifier.fillMaxWidth(0.88f)
-                ) {
-                    SessionsDrawerContent(
-                        sessions = sessions,
-                        currentSessionId = currentSessionId,
-                        isLoading = isLoadingSessions,
-                        language = language,
-                        pinnedSessionIds = pinnedSessionIds,
-                        onTogglePinSession = { id -> vm.togglePinSession(id) },
-                        onSelectSession = { id ->
-                            vm.selectSession(id)
-                            scope.launch { drawerState.close() }
-                        },
-                        onCreateNewSession = {
-                            vm.createNewSession()
-                            scope.launch { drawerState.close() }
-                        },
-                        onDeleteSession = { id ->
-                            vm.deleteSession(id)
-                        },
-                        onExportSession = { id, title ->
-                            vm.exportSessionAsMarkdown(id, title, context)
-                        },
-                        onRenameSession = { id, newTitle ->
-                            vm.renameSession(id, newTitle)
-                        },
-                        onForkSession = { id ->
-                            vm.forkSession(id)
-                            scope.launch { drawerState.close() }
-                        },
-                        hasMoreSessions = sessionsHasMore,
-                        isLoadingMoreSessions = isLoadingMoreSessions,
-                        onLoadMoreSessions = { vm.loadMoreSessions() },
-                        onRefreshSessions = {
-                            vm.loadSessions(triggerSync = true)
-                        },
-                        onClose = {
-                            scope.launch { drawerState.close() }
-                        }
-                    )
-                }
-            }
+    // Wide screens (tablets, landscape >= 840dp): the sessions list stays
+    // visible beside the content instead of hiding in a drawer.
+    val wideTwoPane = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 840
+    val closeDrawer: () -> Unit = { if (!wideTwoPane) scope.launch { drawerState.close() } }
+    val drawerPanel: @Composable () -> Unit = {
+        ModalDrawerSheet(
+            drawerContainerColor = Color(0xFF0A0D15),
+            drawerContentColor = TextPrimary,
+            modifier = Modifier.fillMaxWidth(if (wideTwoPane) 1f else 0.88f).fillMaxHeight()
         ) {
+            SessionsDrawerContent(
+                sessions = sessions,
+                currentSessionId = currentSessionId,
+                isLoading = isLoadingSessions,
+                language = language,
+                pinnedSessionIds = pinnedSessionIds,
+                onTogglePinSession = { id -> vm.togglePinSession(id) },
+                onSelectSession = { id ->
+                    vm.selectSession(id)
+                    closeDrawer()
+                },
+                onCreateNewSession = {
+                    vm.createNewSession()
+                    closeDrawer()
+                },
+                onDeleteSession = { id ->
+                    vm.deleteSession(id)
+                },
+                onExportSession = { id, title ->
+                    vm.exportSessionAsMarkdown(id, title, context)
+                },
+                onRenameSession = { id, newTitle ->
+                    vm.renameSession(id, newTitle)
+                },
+                onForkSession = { id ->
+                    vm.forkSession(id)
+                    closeDrawer()
+                },
+                hasMoreSessions = sessionsHasMore,
+                isLoadingMoreSessions = isLoadingMoreSessions,
+                onLoadMoreSessions = { vm.loadMoreSessions() },
+                onRefreshSessions = {
+                    vm.loadSessions(triggerSync = true)
+                },
+                onClose = {
+                    closeDrawer()
+                }
+            )
+        }
+    }
+    val mainScaffold: @Composable () -> Unit = {
             Scaffold(
                 containerColor = CyberBg,
                 topBar = {
@@ -230,7 +251,8 @@ fun MainScreen(
                             } else {
                                 vm.disconnectManual()
                             }
-                        }
+                        },
+                        activeDeviceName = activeProfileName
                     )
                 },
                 bottomBar = {
@@ -432,7 +454,8 @@ fun MainScreen(
                             },
                             queuedMessageCount = queuedMessages.size,
                             onCancelQueued = { vm.cancelQueued() },
-                            onGoToSettings = { vm.setActiveTab(AppTab.GATEWAY) }
+                            onGoToSettings = { vm.setActiveTab(AppTab.GATEWAY) },
+                            chatFontScale = chatFontScale
                         )
                     }
                     AppTab.TERMINAL -> {
@@ -487,6 +510,8 @@ fun MainScreen(
                             biometricLockEnabled = biometricLockEnabled,
                             onToggleBiometricLock = { vm.setBiometricLockEnabled(it) },
                             encryptionAvailable = vm.encryptionAvailable,
+                            chatFontScale = chatFontScale,
+                            onChatFontScaleChange = { vm.setChatFontScale(it) },
                             onSaveConfig = { vm.updateConnectionConfig(it) },
                             onTestPing = { vm.testPing() },
                             onStartAutoDiscovery = { vm.startAutoDiscovery() },
@@ -507,6 +532,24 @@ fun MainScreen(
                 }
             }
         }
+    } // end mainScaffold
+
+    CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (wideTwoPane) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.weight(0.85f).fillMaxHeight()) { drawerPanel() }
+                    Box(modifier = Modifier.weight(1.35f).fillMaxHeight()) { mainScaffold() }
+                }
+            } else {
+                ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    gesturesEnabled = true,
+                    drawerContent = { drawerPanel() }
+                ) {
+                    mainScaffold()
+                }
+            }
         // Biometric lock gate overlays everything when app lock is enabled.
         if (needsBiometricUnlock) {
             BiometricLockGate(onUnlocked = { vm.onBiometricUnlocked() })
@@ -514,4 +557,3 @@ fun MainScreen(
         } // end Box
         } // end CompositionLocalProvider
     }
-}

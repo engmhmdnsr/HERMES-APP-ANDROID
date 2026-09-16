@@ -2,7 +2,7 @@
 
 Mobile control center for **Hermes Agent** running on a Windows PC, reached securely over **Tailscale**. Browse sessions, read chat history, switch models, send prompts with live SSE streaming + tool execution blocks, and check gateway health.
 
-> **v1.3.2** — this app is **generic**: every user connects to **their own** Hermes PC. No author-specific IPs or keys are baked in. Package ID: `ee.oversight.hermes`. Built by Oversight.ee. **This app is not an official Hermes application.**
+> **v1.3.3** — this app is **generic**: every user connects to **their own** Hermes PC. No author-specific IPs or keys are baked in. Package ID: `ee.oversight.hermes`. Built by Oversight.ee. **This app is not an official Hermes application.**
 
 This app talks to the **official Hermes API server** built into Hermes Agent (the `api_server` gateway platform) — no custom FastAPI shim required.
 
@@ -78,7 +78,7 @@ curl -H "Authorization: Bearer <API_SERVER_KEY>" http://127.0.0.1:8080/health
 
 ## Phone Setup
 
-1. Install the APK (`HermesControl-v1.3.2.apk` from the latest GitHub release, or `app/build/outputs/apk/release/app-release.apk`).
+1. Install the APK (`HermesControl-v1.3.3.apk` from the latest GitHub release, or `app/build/outputs/apk/release/app-release.apk`).
 2. Open **Gateway** tab.
 3. Enter your PC's **Tailscale IP** (e.g. `100.124.105.88`), **port** `8080`, and the **API_SERVER_KEY** from `.env`.
 4. Tap **TEST PING** - you should see `PEER HANDSHAKE SUCCESSFUL`.
@@ -191,8 +191,15 @@ passwords in `keystore-credentials.txt` (gitignored, local only):
 ```bash
 ./gradlew assembleRelease
 # APK: app/build/outputs/apk/release/app-release.apk
-# Copy to repo root as HermesControl-v1.3.2.apk
+# Copy to repo root as HermesControl-v1.3.3.apk
 ```
+
+## What's new (v1.3.3)
+
+- First-run flow: no saved device opens Settings with a register-device prompt; a saved device with no session chosen opens the sessions drawer at startup.
+- Status ribbon shows the registered device name (blank when none); app version shown at the very bottom of Settings.
+- Responsive pass: flexible TopBar/chat controls with ellipsis, auto compact mode on narrow phones (<380dp), side-by-side sessions + content on wide screens (>=840dp).
+- Chat font size control (60-140%) in Settings, chat messages only.
 
 ## What's new (v1.3.2)
 

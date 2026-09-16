@@ -57,6 +57,7 @@ class HermesPreferencesRepository(context: Context) {
         private const val KEY_PINNED_SESSIONS = "pref_pinned_sessions"
         private const val KEY_GLOBAL_AUTO_APPROVE = "pref_global_auto_approve"
         private const val KEY_BIOMETRIC_LOCK = "pref_biometric_lock"
+        private const val KEY_CHAT_FONT_SCALE = "pref_chat_font_scale"
     }
 
     fun isBiometricLockEnabled(): Boolean = prefs.getBoolean(KEY_BIOMETRIC_LOCK, false)
@@ -198,5 +199,13 @@ class HermesPreferencesRepository(context: Context) {
 
     fun saveGlobalAutoApprove(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_GLOBAL_AUTO_APPROVE, enabled).apply()
+    }
+
+    fun getChatFontScale(): Float {
+        return (prefs.getFloat(KEY_CHAT_FONT_SCALE, 1f)).coerceIn(0.6f, 1.4f)
+    }
+
+    fun saveChatFontScale(scale: Float) {
+        prefs.edit().putFloat(KEY_CHAT_FONT_SCALE, scale.coerceIn(0.6f, 1.4f)).apply()
     }
 }

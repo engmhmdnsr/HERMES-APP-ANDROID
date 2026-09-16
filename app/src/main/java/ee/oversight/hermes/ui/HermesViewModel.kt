@@ -136,8 +136,17 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         HermesAppLog.info("Reasoning effort set to: $normalized")
     }
 
-    private val _activeTab = MutableStateFlow(if (prefsRepo.getConnectionConfig().tailscaleIp.isBlank()) AppTab.GATEWAY else AppTab.CHAT)
+    private val _activeTab = MutableStateFlow(if (!prefsRepo.getConnectionConfig().isConfigured) AppTab.GATEWAY else AppTab.CHAT)
     val activeTab: StateFlow<AppTab> = _activeTab.asStateFlow()
+
+    private val _chatFontScale = MutableStateFlow(prefsRepo.getChatFontScale())
+    val chatFontScale: StateFlow<Float> = _chatFontScale.asStateFlow()
+
+    fun setChatFontScale(scale: Float) {
+        val clamped = scale.coerceIn(0.6f, 1.4f)
+        _chatFontScale.value = clamped
+        prefsRepo.saveChatFontScale(clamped)
+    }
 
     private val _pingResult = MutableStateFlow<PingResult?>(null)
     val pingResult: StateFlow<PingResult?> = _pingResult.asStateFlow()
@@ -914,18 +923,23 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     // ---- Named connection profiles ----
 
+    private val _activeProfileName = MutableStateFlow(prefsRepo.getActiveProfileName())
+    val activeProfileName: StateFlow<String> = _activeProfileName.asStateFlow()
+
     fun getSavedProfileNames(): List<String> = prefsRepo.getSavedProfileNames()
 
     fun saveCurrentAsProfile(name: String) {
         if (name.isBlank()) return
         prefsRepo.saveProfile(name.trim(), _config.value)
         prefsRepo.setActiveProfileName(name.trim())
+        _activeProfileName.value = name.trim()
         HermesAppLog.info("Saved connection profile: ${name.trim()}")
     }
 
     fun loadProfile(name: String) {
         val cfg = prefsRepo.getProfileConfig(name) ?: return
         prefsRepo.setActiveProfileName(name)
+        _activeProfileName.value = name
         updateConnectionConfig(cfg)
         HermesAppLog.info("Loaded connection profile: $name")
     }
@@ -934,11 +948,12 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         prefsRepo.deleteProfile(name)
         if (prefsRepo.getActiveProfileName() == name) {
             prefsRepo.setActiveProfileName("")
+            _activeProfileName.value = ""
         }
         HermesAppLog.info("Deleted connection profile: $name")
     }
 
-    fun getActiveProfileName(): String = prefsRepo.getActiveProfileName()
+    fun getActiveProfileName(): String = _activeProfileName.value
 
     fun connectToSaved() {
         if (_config.value.isConfigured) {

@@ -31,6 +31,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -52,6 +55,8 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -83,6 +88,8 @@ import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import ee.oversight.hermes.BuildConfig
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -147,6 +154,8 @@ fun GatewayConfigScreen(
     onStartAutoDiscovery: () -> Unit = {},
     onConnectDiscovered: (DiscoveredGateway, Boolean) -> Unit = { _, _ -> },
     encryptionAvailable: Boolean = true,
+    chatFontScale: Float = 1f,
+    onChatFontScaleChange: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -197,6 +206,36 @@ fun GatewayConfigScreen(
         )
 
         Spacer(modifier = Modifier.height(14.dp))
+
+        // No-device prompt: when nothing is saved yet, point the user at
+        // registering their first device below.
+        if (!hasSavedDevices) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(NeonAmber.copy(alpha = 0.12f))
+                    .border(1.dp, NeonAmber, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = NeonAmber,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (language == AppLanguage.AR)
+                        "لا يوجد جهاز مسجل. سجل جهازك الجديد من الأسفل ثم اضغط حفظ واتصال."
+                    else
+                        "No device registered. Register your new device below, then Save and Connect.",
+                    style = MonospaceStyle.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NeonAmber)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // Security warning: secure storage unavailable on this device.
         if (!encryptionAvailable) {
@@ -273,6 +312,60 @@ fun GatewayConfigScreen(
                     )
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ===== Chat font size (chat messages only) =====
+        SectionCard {
+            SectionHeader(
+                title = if (language == AppLanguage.AR) "حجم خط الشات" else "CHAT FONT SIZE",
+                icon = { Icon(Icons.Default.TextFields, null, tint = NeonCyan, modifier = Modifier.size(16.dp)) }
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (language == AppLanguage.AR) "تكبير وتصغير خط رسائل الشات بس" else "Scales chat message text only",
+                style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary),
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+            // Live preview at the current scale
+            Text(
+                text = if (language == AppLanguage.AR) "معاينة: هكذا ستظهر رسائل الشات" else "Preview: chat messages will look like this",
+                style = MonospaceStyle.copy(fontSize = 13.5.sp * chatFontScale, color = TextPrimary)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = { onChatFontScaleChange(chatFontScale - 0.05f) },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.Remove, null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                }
+                Slider(
+                    value = chatFontScale,
+                    onValueChange = { onChatFontScaleChange(it) },
+                    valueRange = 0.6f..1.4f,
+                    steps = 15,
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = NeonCyan,
+                        activeTrackColor = NeonCyan,
+                        inactiveTrackColor = CyberSurfaceBorder
+                    )
+                )
+                IconButton(
+                    onClick = { onChatFontScaleChange(chatFontScale + 0.05f) },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.Add, null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                }
+            }
+            Text(
+                text = "${(chatFontScale * 100).toInt()}%",
+                style = MonospaceStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NeonCyan),
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
         }
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -1267,6 +1360,15 @@ fun GatewayConfigScreen(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+
+        // App version, very bottom of Settings
+        Text(
+            text = "Hermes Control v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            style = MonospaceStyle.copy(fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.7f)),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
     }
 
     // ===== How-to-connect popup dialog =====

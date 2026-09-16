@@ -65,6 +65,12 @@ import ee.oversight.hermes.ui.theme.NeonAmber
 import ee.oversight.hermes.ui.theme.NeonVioletLight
 
 @Composable
+fun isCompactScreenWidth(): Boolean {
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    return configuration.screenWidthDp < 380
+}
+
+@Composable
 fun CyberpunkTopBar(
     status: ConnectionStatus,
     config: ConnectionConfig,
@@ -78,6 +84,7 @@ fun CyberpunkTopBar(
     onToggleGlobalAutoApprove: ((Boolean) -> Unit)? = null,
     onTriggerTestApproval: (() -> Unit)? = null,
     onToggleConnection: ((Boolean) -> Unit)? = null,
+    activeDeviceName: String = "",
     modifier: Modifier = Modifier
 ) {
     val (statusColor, statusLabel) = when (status) {
@@ -92,21 +99,26 @@ fun CyberpunkTopBar(
     val totalTok = tokenUsage?.totalTokens ?: 0L
     val inTok = tokenUsage?.inputTokens ?: 0L
     val outTok = tokenUsage?.outputTokens ?: 0L
+    // Compact mode on narrow phones (<380dp): smaller chrome, tighter padding.
+    val compact = isCompactScreenWidth()
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(CyberBg)
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = if (compact) 10.dp else 16.dp, vertical = if (compact) 6.dp else 10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Logo & Title
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Logo & Title (shrinks gracefully so the token pill always fits)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
                 if (onOpenDrawer != null) {
                     IconButton(
                         onClick = onOpenDrawer,
@@ -124,7 +136,7 @@ fun CyberpunkTopBar(
 
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(if (compact) 28.dp else 36.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color(0xFF16192E))
                         .border(1.dp, NeonViolet.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
@@ -134,37 +146,44 @@ fun CyberpunkTopBar(
                     Image(
                         painter = painterResource(id = R.drawable.ic_hermes_logo),
                         contentDescription = "Oversight Logo",
-                        modifier = Modifier.size(26.dp)
+                        modifier = Modifier.size(if (compact) 20.dp else 26.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(if (compact) 6.dp else 10.dp))
 
-                Column {
+                Column(modifier = Modifier.weight(1f, fill = false)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = HermesStrings.appTitle(language),
                             style = MonospaceStyle.copy(
-                                fontSize = 16.sp,
+                                fontSize = if (compact) 14.sp else 16.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = TextPrimary
-                            )
+                            ),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
-                        Text(
-                            text = " // CTRL",
-                            style = MonospaceStyle.copy(
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeonViolet
+                        if (!compact) {
+                            Text(
+                                text = " // CTRL",
+                                style = MonospaceStyle.copy(
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonViolet
+                                ),
+                                maxLines = 1
                             )
-                        )
+                        }
                     }
                     Text(
                         text = HermesStrings.appSubtitle(language),
                         style = MonospaceStyle.copy(
                             fontSize = 10.sp,
                             color = TextSecondary
-                        )
+                        ),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                 }
             }
@@ -219,8 +238,12 @@ fun CyberpunkTopBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Connection target + Toggle Switch
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Connection target + Toggle Switch (takes leftover width so the
+            // badge + ping on the right never get squeezed on narrow phones)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
                 Box(
                     modifier = Modifier.size(width = 38.dp, height = 24.dp),
                     contentAlignment = Alignment.Center
@@ -259,14 +282,18 @@ fun CyberpunkTopBar(
                     )
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                if (config.tailscaleIp.isNotBlank()) {
+                // Registered device name only. Empty when no named device
+                // is active (no address fallback).
+                if (activeDeviceName.isNotBlank()) {
                     Text(
-                        text = config.effectiveGatewayUrl.removePrefix("http://").removePrefix("https://"),
+                        text = activeDeviceName,
                         style = MonospaceStyle.copy(
                             fontSize = 10.sp,
                             color = TextSecondary
                         ),
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                 }
             }

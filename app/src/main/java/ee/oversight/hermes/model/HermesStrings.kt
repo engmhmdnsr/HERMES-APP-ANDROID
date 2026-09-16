@@ -4,8 +4,8 @@ object HermesStrings {
     // App Bar & Brand
     fun appTitle(lang: AppLanguage) = "HERMES"
     fun appSubtitle(lang: AppLanguage) = when (lang) {
-        AppLanguage.AR -> "بوابة التحكم • Oversight.ee"
-        AppLanguage.EN -> "Agent Gateway • Oversight.ee"
+        AppLanguage.AR -> "بوابة التحكم"
+        AppLanguage.EN -> "Agent Gateway"
     }
 
     // Status Ribbon
